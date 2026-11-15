@@ -1,98 +1,42 @@
-name: Deploy Matrix AI to GitHub Pages
+name: Build Emscripten Project
 
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Pobranie repozytorium
-      uses: actions/checkout@v4
+      # 1. Pobranie kodu źródłowego projektu
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Instalacja Pythona i BusyBoxa w systemie
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3 busybox-static
+      # 2. Instalacja i konfiguracja Emscripten SDK (z użyciem cache, żeby nie pobierać za każdym razem)
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: 'emsdk-cache'
 
-    - name: Instalacja i konfiguracja Emscripten SDK (emsdk)
-      run: |
-        git clone https://github.com/emscripten-core/emsdk.git
-        cd emsdk
-        ./emsdk install latest
-        ./emsdk activate latest
+      # 3. Kompilacja projektu (zastąp poniższe polecenie swoim faktycznym poleceniem emcc)
+      - name: Compile with Emcc
+        run: |
+          mkdir -p build
+          emcc cmd_ia_sdl/cmd.c -o build/index.html \
+            -s USE_SDL=2 \
+            -s USE_SDL_TTF=2 \
+            -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
+            --preload-file assets \
+            -O3
 
-    - name: Przygotowanie folderu assets (BusyBox, ONNX, Czcionka)
-      run: |
-        mkdir -p assets
-        
-        # 1. Kopiowanie systemowego BusyBoxa bezpośrednio do assets/
-        echo "Kopiowanie BusyBoxa..."
-        cp /bin/busybox assets/busybox
-        chmod +x assets/busybox
-
-        # 2. Sprawdzenie / wygenerowanie pliku ONNX
-        if [ -f "network_anomaly.onnx" ]; then
-          cp network_anomaly.onnx assets/
-        elif [ ! -f "assets/network_anomaly.onnx" ]; then
-          echo "Generowanie zastępczego pliku network_anomaly.onnx..."
-          python3 -c "with open('assets/network_anomaly.onnx', 'wb') as f: f.write(bytes(range(256)))"
-        fi
-
-        # 3. Sprawdzenie / pobranie czcionki lazy.ttf
-        if [ -f "lazy.ttf" ]; then
-          cp lazy.ttf assets/
-        elif [ ! -f "assets/lazy.ttf" ]; then
-          echo "Pobieranie czcionki fallback lazy.ttf..."
-          wget -O assets/lazy.ttf https://github.com/libsdl-org/SDL_ttf/raw/release-2.20.0/test/sample.ttf
-        fi
-
-    - name: Kompilacja kodu przez emcc (WebAssembly + Eksport funkcji)
-      run: |
-        cd emsdk
-        source ./emsdk_env.sh
-        cd ..
-
-        echo "Kompilacja C99 -> WASM z eksportem funkcji dla HTML..."
-        emcc cmd.c -o index.html \
-          -s USE_SDL=2 \
-          -s USE_SDL_TTF=2 \
-          -s ALLOW_MEMORY_GROWTH=1 \
-          -s STACK_SIZE=5242880 \
-          -s "EXPORTED_FUNCTIONS=['_main','_zewnetrzny_input_ai']" \
-          -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap']" \
-          --preload-file assets \
-          --shell-file shell.html \
-          -O3 \
-          -std=c99
-
-    - name: Konfiguracja stron GitHub Pages
-      uses: actions/configure-pages@v4
-
-    - name: Pakowanie plików do wdrożenia
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: '.'
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-    - name: Wdrożenie na GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+      # 4. KLUCZOWE: Spakowanie i wysłanie jako Artifact TYLKO folderu 'build'
+      - name: Upload WebAssembly Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: webassembly-app
+          path: build/
+          retention-days: 7
