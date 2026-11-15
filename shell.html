@@ -10,21 +10,26 @@
             color: #00ff00;
             font-family: monospace;
             margin: 0;
-            padding: 0;
+            padding: 10px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            overflow: hidden;
+            min-height: 100vh;
+            box-sizing: border-box;
+            overflow-x: hidden;
         }
         .emscripten_border {
             border: 2px solid #00ff00;
             background-color: #000;
-            box-shadow: 0 0 25px rgba(0, 255, 0, 0.25);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
             border-radius: 4px;
+            width: 100%;
+            max-width: 750px; /* Okno nigdy nie będzie za duże! */
         }
         #canvas {
+            width: 100%;
+            height: auto; /* Płynne skalowanie proporcjonalne */
             display: block;
             outline: none;
             background-color: #000000;
@@ -34,7 +39,6 @@
 <body>
 
     <div class="emscripten_border">
-        <!-- Płótno SDL z atrybutem tabindex pozwalającym na odbieranie fokusu -->
         <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
     </div>
 
@@ -42,20 +46,16 @@
         var Module = {
             preRun: [],
             postRun: [],
-            print: (function() {
-                return function(text) {
-                    if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-                    console.log("[WASM OUT]: " + text);
-                };
-            })(),
+            print: function(text) {
+                console.log("[WASM OUT]: " + text);
+            },
             printErr: function(text) {
-                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
                 console.error("[WASM ERR]: " + text);
             },
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
                 
-                // Automatyczne ustawianie fokusu na canvas
+                // Automatyczne łapanie fokusu i aktywacja klawiatury przy kliknięciu
                 window.addEventListener('load', function() {
                     canvas.focus();
                 });
@@ -70,7 +70,7 @@
                 return canvas;
             })(),
             setStatus: function(text) {
-                if (text) console.log("Emscripten status: " + text);
+                if (text) console.log("Status: " + text);
             },
             totalDependencies: 0,
             monitorRunDependencies: function(left) {
@@ -83,7 +83,6 @@
         };
     </script>
 
-    <!-- W tym miejscu Emscripten wstrzyknie wygenerowany skrypt -->
     {{{ SCRIPT }}}
 
 </body>

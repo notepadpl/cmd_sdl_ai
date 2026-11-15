@@ -469,7 +469,7 @@ int main(int argc, char* args[]) {
     TTF_Font* font = TTF_OpenFont("assets/lazy.ttf", 18);
     if (!font) font = TTF_OpenFont("lazy.ttf", 18);
 
-    SDL_StartTextInput();
+   /* SDL_StartTextInput();*/
 
     pthread_mutex_lock(&ui_mutex);
     snprintf(globalOutputLines[global_output_count++], LINE_LEN, "System C uruchomiony. Wpisz 'ia' lub komendę (np. 'ls -la'):");
