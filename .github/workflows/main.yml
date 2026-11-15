@@ -59,13 +59,13 @@ jobs:
           wget -O assets/lazy.ttf https://github.com/libsdl-org/SDL_ttf/raw/release-2.20.0/test/sample.ttf
         fi
 
-    - name: Kompilacja kodu przez emcc (WebAssembly + Assets)
+    - name: Kompilacja kodu przez emcc (WebAssembly + Assets + Shell)
       run: |
         cd emsdk
         source ./emsdk_env.sh
         cd ..
 
-        echo "Kompilacja C99 -> WASM z wbudowanym BusyBoxem i zasobami..."
+        echo "Kompilacja C99 -> WASM z dedykowanym szablonem shell.html..."
         emcc cmd.c -o index.html \
           -s USE_SDL=2 \
           -s USE_SDL_TTF=2 \
