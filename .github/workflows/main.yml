@@ -22,10 +22,10 @@ jobs:
     - name: Pobranie repozytorium
       uses: actions/checkout@v4
 
-    - name: Instalacja Pythona
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+    - name: Instalacja Pythona i BusyBoxa w systemie
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 busybox-static
 
     - name: Instalacja i konfiguracja Emscripten SDK (emsdk)
       run: |
@@ -38,11 +38,9 @@ jobs:
       run: |
         mkdir -p assets
         
-        # 1. Pobranie BusyBoxa z niezawodnego źródła z fallbackiem
-        echo "Pobieranie BusyBoxa..."
-        wget -O assets/busybox https://github.com/eugenmayer/docker-busybox-static/raw/master/bin/busybox || \
-        wget -O assets/busybox https://busybox.net/downloads/binaries/1.31.0-defconfig-musl/busybox-x86_64
-        
+        # 1. Kopiowanie systemowego BusyBoxa bezpośrednio do assets/
+        echo "Kopiowanie BusyBoxa..."
+        cp /bin/busybox assets/busybox
         chmod +x assets/busybox
 
         # 2. Sprawdzenie / wygenerowanie pliku ONNX
@@ -68,7 +66,7 @@ jobs:
         cd ..
 
         echo "Kompilacja C99 -> WASM z wbudowanym BusyBoxem i zasobami..."
-        emcc cmd.c -o index.html \
+        emcc main.c -o index.html \
           -s USE_SDL=2 \
           -s USE_SDL_TTF=2 \
           -s ALLOW_MEMORY_GROWTH=1 \
