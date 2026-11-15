@@ -38,9 +38,11 @@ jobs:
       run: |
         mkdir -p assets
         
-        # 1. Pobranie BusyBoxa x86_64 i umieszczenie go w assets/
+        # 1. Pobranie BusyBoxa z niezawodnego źródła z fallbackiem
         echo "Pobieranie BusyBoxa..."
-        wget -O assets/busybox https://busybox.net/downloads/binaries/1.35.0-defconfig-musl/busybox-x86_64
+        wget -O assets/busybox https://github.com/eugenmayer/docker-busybox-static/raw/master/bin/busybox || \
+        wget -O assets/busybox https://busybox.net/downloads/binaries/1.31.0-defconfig-musl/busybox-x86_64
+        
         chmod +x assets/busybox
 
         # 2. Sprawdzenie / wygenerowanie pliku ONNX
@@ -66,7 +68,7 @@ jobs:
         cd ..
 
         echo "Kompilacja C99 -> WASM z wbudowanym BusyBoxem i zasobami..."
-        emcc main.c -o index.html \
+        emcc cmd.c -o index.html \
           -s USE_SDL=2 \
           -s USE_SDL_TTF=2 \
           -s ALLOW_MEMORY_GROWTH=1 \
