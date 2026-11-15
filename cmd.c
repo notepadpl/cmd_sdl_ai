@@ -299,7 +299,12 @@ void main_loop(void* arg) {
 #ifdef __EMSCRIPTEN__
             emscripten_cancel_main_loop();
 #endif
-        } else if (e.type == SDL_TEXTINPUT) {
+        } 
+        // KLUCZOWE DLA WASM: Kliknięcie myszką aktywuje SDL Text Input i fokus klawiatury
+        else if (e.type == SDL_MOUSEBUTTONDOWN) {
+            SDL_StartTextInput();
+        } 
+        else if (e.type == SDL_TEXTINPUT) {
             size_t len = strlen(state->userInput);
             if (len < 80) {
                 strcat(state->userInput, e.text.text);
