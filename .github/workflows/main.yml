@@ -63,7 +63,7 @@ jobs:
         cd ..
 
         echo "Kompilacja C99 -> WASM..."
-        emcc main.c -o index.html \
+        emcc cmd.c -o index.html \
           -s USE_SDL=2 \
           -s USE_SDL_TTF=2 \
           -s ALLOW_MEMORY_GROWTH=1 \
