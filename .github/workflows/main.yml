@@ -1,4 +1,4 @@
-name: Deploy Matrix AI to GitHub Page
+name: Deploy Matrix AI to GitHub Pages
 
 on:
   push:
