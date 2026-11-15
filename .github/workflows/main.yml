@@ -31,6 +31,7 @@ jobs:
             -s USE_SDL_TTF=2 \
             -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
             --preload-file assets \
+            --shell-file shell.html \
             -O3
 
       # 4. KLUCZOWE: Spakowanie i wysłanie jako Artifact TYLKO folderu 'build'
