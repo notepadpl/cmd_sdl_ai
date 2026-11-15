@@ -7,9 +7,10 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include <SDL2/SDL.h>
-//#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_image.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -31,7 +32,7 @@ unsigned char *onnx_model_buffer = NULL;
 long onnx_model_size = 0;
 long ocean_index = 0;
 
-// Bufor na linie tekstowe UI (zamiast std::vector<std::string>)
+// Bufor na linie tekstowe UI
 char globalOutputLines[MAX_LINES][LINE_LEN];
 int global_output_count = 0;
 int global_last_output_len = 0; 
@@ -51,7 +52,7 @@ void push_to_stm(const char* item) {
     pthread_mutex_unlock(&stm_mutex);
 }
 
-unsigned char get_next_ocean_byte(); // deklaracja wstępna
+unsigned char get_next_ocean_byte();
 
 // --- ALFABETY I ZNAKI SPECJALNE ---
 const char* alphabet_pure = "abcdefghijklmnopqrstuvwxyz";
@@ -141,18 +142,28 @@ char* run_system_command(const char* cmd) {
     if (!echo) return NULL;
     
     char full_cmd[MAX_FILE_SIZE];
+
+#ifdef __EMSCRIPTEN__
+    snprintf(full_cmd, sizeof(full_cmd), "./assets/busybox sh -c \"%s\" > /tmp_out.txt 2>&1", cmd);
+    int ret = system(full_cmd);
     
-    // Sprawdzamy czy katalog DroidC istnieje – jeśli tak, używamy ścieżek z telefonu, w przeciwnym razie domyślnego sh/busyboxa z Ubuntu
+    FILE *f = fopen("/tmp_out.txt", "r");
+    if (f) {
+        size_t r = fread(echo, 1, MAX_FILE_SIZE - 1, f);
+        echo[r] = '\0';
+        fclose(f);
+    } else {
+        snprintf(echo, MAX_FILE_SIZE, "BusyBox execution result (code: %d)\n", ret);
+    }
+#else
     FILE *test_droidc = fopen("/data/user/0/com.n0n3m4.droidc/files/sh", "r");
     if (test_droidc) {
         fclose(test_droidc);
         snprintf(full_cmd, sizeof(full_cmd), 
-            "export PATH=\"/busybox-virtual:/data/user/0/com.n0n3m4.droidc/files/:/data/user/0/com.n0n3m4.droidc/files/gcc/bin:$PATH\"; "
-            "export SHELL=\"/data/user/0/com.n0n3m4.droidc/files/sh\"; %s 2>&1", cmd);
+            "export PATH=\"/busybox-virtual:/data/user/0/com.n0n3m4.droidc/files/:$PATH\"; %s 2>&1", cmd);
     } else {
         snprintf(full_cmd, sizeof(full_cmd), 
-            "export PATH=\"./busybox-virtual:$PATH\"; "
-            "export SHELL=\"/bin/sh\"; %s 2>&1", cmd);
+            "export PATH=\"./busybox-virtual:$PATH\"; %s 2>&1", cmd);
     }
 
     FILE *fp = popen(full_cmd, "r");
@@ -163,6 +174,8 @@ char* run_system_command(const char* cmd) {
     size_t len = fread(echo, 1, MAX_FILE_SIZE - 1, fp);
     echo[len] = '\0';
     pclose(fp);
+#endif
+
     return echo;
 }
 
@@ -176,7 +189,6 @@ void write_success_state(int gen, const char* source, const char* successful_cmd
     pthread_mutex_unlock(&file_rw_mutex);
 }
 
-// Główna funkcja parsująca i ucząca z animacją i wchodzeniem outputu w strukturę graficzną
 void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display) {
     if (!raw_input || strlen(raw_input) == 0) return;
 
@@ -208,8 +220,6 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
             strncpy(paired_files, token, sizeof(paired_files) - 1);
         }
     }
-
-    unsigned char xor_key = (unsigned char)(trained_model.generation & 0xFF);
 
     char *res = run_system_command(raw_input);
     int command_failed = 0;
@@ -256,7 +266,6 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
     dzin_atomic_molecular_mutation(&trained_model, mutation_power);
 }
 
-// Wątek w tle
 void* background_terminal_thread(void* arg) {
     char input_buf[256];
     while (fgets(input_buf, sizeof(input_buf), stdin) != NULL) {
@@ -303,10 +312,10 @@ void main_loop(void* arg) {
                 if (len > 0) {
                     parse_and_learn_command(state->userInput, "KBD-SDL", 1);
                     state->userInput[0] = '\0';
-                    state->scroll_offset = 0; // Reset scrollu przy nowej komendze
+                    state->scroll_offset = 0;
                 }
             } else if (e.key.keysym.sym == SDLK_DOWN) {
-                state->scroll_offset += 2; // Płynny scroll w dół
+                state->scroll_offset += 2;
             } else if (e.key.keysym.sym == SDLK_UP) {
                 if (state->scroll_offset >= 2) state->scroll_offset -= 2;
             }
@@ -315,7 +324,6 @@ void main_loop(void* arg) {
 
     state->frame_counter++;
 
-    // Automatyczna akcja AI w tle co pewien czas
     if (state->frame_counter % 180 == 0) {
         dzin_atomic_molecular_mutation(&trained_model, 0.3f);
     }
@@ -325,7 +333,6 @@ void main_loop(void* arg) {
     current_len = global_last_output_len;
     pthread_mutex_unlock(&ui_mutex);
 
-    // Dynamiczna deformacja siatki 3D zależna od długości outputu (animacja wejścia w AI)
     if (current_len > 0) {
         for (int i = 0; i < state->liczba_wezlow; i++) {
             float mod = (float)(current_len % 7) * 0.1f;
@@ -355,7 +362,6 @@ void main_loop(void* arg) {
         sy[i] = (int)((OKNO_WYSOKOSC - 130) + y1 * skala);
     }
 
-    // Rysowanie połączeń siatki
     SDL_SetRenderDrawColor(state->renderer, 0, 100, 0, 160);
     for (int i = 0; i < state->liczba_wezlow; i++) {
         int n1 = (i + 1) % state->liczba_wezlow;
@@ -366,7 +372,6 @@ void main_loop(void* arg) {
         }
     }
 
-    // Rysowanie węzłów
     for (int i = 0; i < state->liczba_wezlow; i++) {
         uint8_t b = state->siec[i].b;
         if (b >= 32 && b <= 126) {
@@ -378,7 +383,6 @@ void main_loop(void* arg) {
         SDL_RenderFillRect(state->renderer, &kropka);
     }
 
-    // Renderowanie tekstu i okna wynikowego z uwzględnieniem scrolla
     if (state->font) {
         SDL_Color aiTextColor = { 0, 255, 0, 255 };
         SDL_Color inputTextColor = { 150, 255, 150, 255 };
@@ -395,9 +399,8 @@ void main_loop(void* arg) {
                 SDL_Texture* textTexture = SDL_CreateTextureFromSurface(state->renderer, textSurface);
                 SDL_Rect renderQuad = { 15, y, textSurface->w, textSurface->h };
                 
-                // Ograniczenie wysokości rysowania, żeby nie nachodziło na linię wprowadzania
                 if (y < OKNO_WYSOKOSC - 100) {
-                    SDL_RenderCopy(state->renderer, textTexture, nullptr, &renderQuad);
+                    SDL_RenderCopy(state->renderer, textTexture, NULL, &renderQuad);
                 }
                 y += textSurface->h + 4;
                 SDL_DestroyTexture(textTexture);
@@ -419,7 +422,7 @@ void main_loop(void* arg) {
         if (inputSurface) {
             SDL_Texture* inputTexture = SDL_CreateTextureFromSurface(state->renderer, inputSurface);
             SDL_Rect inputQuad = { 15, y, inputSurface->w, inputSurface->h };
-            SDL_RenderCopy(state->renderer, inputTexture, nullptr, &inputQuad);
+            SDL_RenderCopy(state->renderer, inputTexture, NULL, &inputQuad);
             SDL_DestroyTexture(inputTexture);
             SDL_FreeSurface(inputSurface);
         }
@@ -431,7 +434,7 @@ void main_loop(void* arg) {
 int main(int argc, char* args[]) {
     const char* filename = (argc < 2) ? "assets/network_anomaly.onnx" : args[1];
 
-    FILE *plik = fopen(filename, "rw");
+    FILE *plik = fopen(filename, "rb+");
     if (!plik) {
         onnx_model_size = 256;
         onnx_model_buffer = (uint8_t*)malloc(onnx_model_size);
@@ -458,8 +461,8 @@ int main(int argc, char* args[]) {
 
     SDL_Window* window = SDL_CreateWindow("Matrix AI Pure C Observer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, OKNO_SZEROKOSC, OKNO_WYSOKOSC, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    TTF_Font* font = TTF_OpenFont("font.ttf", 18);
-    if (!font) font = TTF_OpenFont("assets/lazy.ttf", 18); // Fallback
+    TTF_Font* font = TTF_OpenFont("assets/lazy.ttf", 18);
+    if (!font) font = TTF_OpenFont("lazy.ttf", 18);
 
     SDL_StartTextInput();
 
