@@ -1,0 +1,92 @@
+name: Deploy Matrix AI to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+# Wymagane uprawnienia tokena dla GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Zapobieganie konfliktom przy jednoczesnych wdrożeniach
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Pobranie repozytorium
+      uses: actions/checkout@v4
+
+    - name: Instalacja Pythona
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Instalacja i konfiguracja Emscripten SDK (emsdk)
+      run: |
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install latest
+        ./emsdk activate latest
+
+    - name: Przygotowanie folderu assets i zasobów AI
+      run: |
+        mkdir -p assets
+        
+        # 1. Sprawdzenie / wygenerowanie pliku ONNX
+        if [ -f "network_anomaly.onnx" ]; then
+          cp network_anomaly.onnx assets/
+        elif [ ! -f "assets/network_anomaly.onnx" ]; then
+          echo "Generowanie zastępczego pliku network_anomaly.onnx..."
+          python3 -c "with open('assets/network_anomaly.onnx', 'wb') as f: f.write(bytes(range(256)))"
+        fi
+
+        # 2. Sprawdzenie / pobranie czcionki lazy.ttf
+        if [ -f "lazy.ttf" ]; then
+          cp lazy.ttf assets/
+        elif [ ! -f "assets/lazy.ttf" ]; then
+          echo "Pobieranie czcionki fallback lazy.ttf..."
+          wget -O assets/lazy.ttf https://github.com/libsdl-org/SDL_ttf/raw/release-2.20.0/test/sample.ttf
+        fi
+
+    - name: Kompilacja kodu przez emcc (WebAssembly)
+      run: |
+        cd emsdk
+        source ./emsdk_env.sh
+        cd ..
+
+        echo "Kompilacja C99 -> WASM..."
+        emcc main.c -o index.html \
+          -s USE_SDL=2 \
+          -s USE_SDL_TTF=2 \
+          -s ALLOW_MEMORY_GROWTH=1 \
+          -s STACK_SIZE=5242880 \
+          --preload-file assets \
+          -O3 \
+          -std=c99
+
+    - name: Konfiguracja stron GitHub Pages
+      uses: actions/configure-pages@v4
+
+    - name: Pakowanie plików do wdrożenia
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: '.'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Wdrożenie na GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
