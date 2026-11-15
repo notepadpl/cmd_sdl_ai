@@ -10,21 +10,59 @@
             color: #00ff00;
             font-family: monospace;
             margin: 0;
-            padding: 0;
+            padding: 10px;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            justify-content: flex-start;
             align-items: center;
-            height: 100vh;
-            overflow: hidden;
+            min-height: 100vh;
+            box-sizing: border-box;
+            gap: 10px;
+        }
+        .input-container {
+            width: 100%;
+            max-width: 750px;
+            display: flex;
+            gap: 5px;
+            order: 1;
+        }
+        #terminal-input {
+            flex-grow: 1;
+            background-color: #050505;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 16px;
+            padding: 8px;
+            border-radius: 4px;
+            outline: none;
+        }
+        #send-btn {
+            background-color: #002200;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            font-family: monospace;
+            font-weight: bold;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #send-btn:active {
+            background-color: #00ff00;
+            color: #000;
         }
         .emscripten_border {
             border: 2px solid #00ff00;
             background-color: #000;
-            box-shadow: 0 0 25px rgba(0, 255, 0, 0.25);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
             border-radius: 4px;
+            width: 100%;
+            max-width: 750px;
+            order: 2;
         }
         #canvas {
+            width: 100%;
+            height: auto;
             display: block;
             outline: none;
             background-color: #000000;
@@ -32,6 +70,12 @@
     </style>
 </head>
 <body>
+
+    <!-- Pasek wpisywania na górze ekranu -->
+    <div class="input-container">
+        <input type="text" id="terminal-input" placeholder="Wpisz komendę dla AI..." autocomplete="off">
+        <button id="send-btn" onclick="wyslijKomende()">WYŚLIJ</button>
+    </div>
 
     <div class="emscripten_border">
         <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
@@ -45,29 +89,33 @@
             printErr: function(text) { console.error("[WASM ERR]: " + text); },
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
-                
-                // Automatyczne ustawianie fokusu na canvas przy starcie i kliknięciu
-                window.addEventListener('load', function() {
-                    canvas.focus();
-                });
-                window.addEventListener('click', function() {
-                    canvas.focus();
-                });
-                canvas.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    canvas.focus();
-                });
-
                 return canvas;
-            })(),
-            setStatus: function(text) { console.log("Status: " + text); },
-            totalDependencies: 0,
-            monitorRunDependencies: function(left) { this.totalDependencies = left; }
+            })()
         };
 
-        window.onerror = function(event) {
-            console.error("Błąd krytyczny WebAssembly: " + event);
-        };
+        // Funkcja wysyłająca dane do pliku w C przez Module.ccall
+        function wyslijKomende() {
+            var input = document.getElementById('terminal-input');
+            var val = input.value.trim();
+            
+            if (val.length > 0) {
+                if (typeof Module.ccall === 'function') {
+                    // Wywołanie funkcji z C: nazwa, typ zwracany, tablica typów, tablica argumentów
+                    Module.ccall('zewnetrzny_input_ai', null, ['string'], [val]);
+                    console.log("Wysłano do C: " + val);
+                } else {
+                    console.error("Module.ccall nie jest jeszcze gotowy!");
+                }
+                input.value = '';
+            }
+        }
+
+        // Obsługa klawisza Enter w polu tekstowym
+        document.getElementById('terminal-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                wyslijKomende();
+            }
+        });
     </script>
 
     {{{ SCRIPT }}}

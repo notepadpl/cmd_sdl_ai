@@ -51,7 +51,20 @@ void push_to_stm(const char* item) {
     if (stm_count < STM_CAPACITY) stm_count++;
     pthread_mutex_unlock(&stm_mutex);
 }
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
+// Ta funkcja odbiera tekst wpisany w HTML przez Module.ccall
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void zewnetrzny_input_ai(const char* user_text) {
+    if (!user_text || strlen(user_text) == 0) return;
+    
+    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
+    parse_and_learn_command(user_text, "USER-WEB", 1);
+}
 unsigned char get_next_ocean_byte();
 
 // --- ALFABETY I ZNAKI SPECJALNE ---
@@ -294,6 +307,7 @@ void main_loop(void* arg) {
     SDL_Event e;
     
     while (SDL_PollEvent(&e) != 0) {
+    	
         if (e.type == SDL_QUIT) {
             state->quit = true;
 #ifdef __EMSCRIPTEN__
