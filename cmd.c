@@ -20,7 +20,8 @@
 #define MAX_FILE_SIZE 4096 
 #define MAX_LINES 64
 #define LINE_LEN 256
-
+// --- DEKLARACJA WSTĘPNA (FORWARD DECLARATION) ---
+void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display);
 // --- ZMIENNE GLOBALNE DLA WĄTKÓW I ENTROPII ---
 pthread_mutex_t ocean_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t evo_mutex = PTHREAD_MUTEX_INITIALIZER;
