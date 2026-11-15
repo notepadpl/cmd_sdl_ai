@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix AI Terminal - C & WebAssembly</title>
+    <style>
+        body {
+            background-color: #000000;
+            color: #00ff00;
+            font-family: monospace;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .emscripten_border {
+            border: 2px solid #00ff00;
+            background-color: #000;
+            box-shadow: 0 0 25px rgba(0, 255, 0, 0.25);
+            border-radius: 4px;
+        }
+        #canvas {
+            display: block;
+            outline: none;
+            background-color: #000000;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="emscripten_border">
+        <!-- Płótno SDL z atrybutem tabindex pozwalającym na odbieranie fokusu -->
+        <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    </div>
+
+    <script type='text/javascript'>
+        var Module = {
+            preRun: [],
+            postRun: [],
+            print: (function() {
+                return function(text) {
+                    if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                    console.log("[WASM OUT]: " + text);
+                };
+            })(),
+            printErr: function(text) {
+                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                console.error("[WASM ERR]: " + text);
+            },
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                
+                // Automatyczne ustawianie fokusu na canvas
+                window.addEventListener('load', function() {
+                    canvas.focus();
+                });
+                window.addEventListener('click', function() {
+                    canvas.focus();
+                });
+                canvas.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    canvas.focus();
+                });
+
+                return canvas;
+            })(),
+            setStatus: function(text) {
+                if (text) console.log("Emscripten status: " + text);
+            },
+            totalDependencies: 0,
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = left;
+            }
+        };
+
+        window.onerror = function(event) {
+            console.error("Błąd krytyczny WebAssembly: " + event);
+        };
+    </script>
+
+    <!-- W tym miejscu Emscripten wstrzyknie wygenerowany skrypt -->
+    {{{ SCRIPT }}}
+
+</body>
+</html>
