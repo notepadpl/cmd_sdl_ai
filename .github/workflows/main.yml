@@ -26,7 +26,7 @@ jobs:
       - name: Compile with Emcc
         run: |
           mkdir -p build
-          emcc cmd_ia_sdl/cmd.c -o build/index.html \
+          emcc cmd.c -o build/index.html \
             -s USE_SDL=2 \
             -s USE_SDL_TTF=2 \
             -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
