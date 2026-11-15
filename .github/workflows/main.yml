@@ -1,10 +1,21 @@
-name: Build Emscripten Project
+name: Build and Deploy Emscripten Project
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+
+# Wymagane uprawnienia do wrzucania strony na GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Zapobiega nakładaniu się wielu wdrożeń naraz
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -15,14 +26,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Instalacja i konfiguracja Emscripten SDK (z użyciem cache, żeby nie pobierać za każdym razem)
+      # 2. Instalacja i konfiguracja Emscripten SDK (z użyciem cache)
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: latest
           actions-cache-folder: 'emsdk-cache'
 
-      # 3. Kompilacja projektu (zastąp poniższe polecenie swoim faktycznym poleceniem emcc)
+      # 3. Kompilacja projektu z Twoim plikiem shell.html
       - name: Compile with Emcc
         run: |
           mkdir -p build
@@ -34,10 +45,25 @@ jobs:
             --shell-file shell.html \
             -O3
 
-      # 4. KLUCZOWE: Spakowanie i wysłanie jako Artifact TYLKO folderu 'build'
+      # 4. Spakowanie i wysłanie jako tradycyjny Artifact (ZIP)
       - name: Upload WebAssembly Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: webassembly-app
           path: build/
           retention-days: 7
+
+      # 5. Konfiguracja GitHub Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      # 6. Przygotowanie paczki pod GitHub Pages z folderu build
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'build'
+
+      # 7. Właściwy Deploy (publikacja strony online)
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
