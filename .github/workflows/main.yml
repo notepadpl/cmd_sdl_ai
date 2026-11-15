@@ -59,18 +59,20 @@ jobs:
           wget -O assets/lazy.ttf https://github.com/libsdl-org/SDL_ttf/raw/release-2.20.0/test/sample.ttf
         fi
 
-    - name: Kompilacja kodu przez emcc (WebAssembly + Assets + Shell)
+    - name: Kompilacja kodu przez emcc (WebAssembly + Eksport funkcji)
       run: |
         cd emsdk
         source ./emsdk_env.sh
         cd ..
 
-        echo "Kompilacja C99 -> WASM z dedykowanym szablonem shell.html..."
+        echo "Kompilacja C99 -> WASM z eksportem funkcji dla HTML..."
         emcc cmd.c -o index.html \
           -s USE_SDL=2 \
           -s USE_SDL_TTF=2 \
           -s ALLOW_MEMORY_GROWTH=1 \
           -s STACK_SIZE=5242880 \
+          -s "EXPORTED_FUNCTIONS=['_main','_zewnetrzny_input_ai']" \
+          -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap']" \
           --preload-file assets \
           --shell-file shell.html \
           -O3 \
