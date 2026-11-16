@@ -425,6 +425,16 @@ void check_and_reward_genie_thought(const char* thought) {
         write_success_state(trained_model.generation, "GENIE-MAGIC", target_cmd);
     }
 }
+// Ta funkcja odbiera tekst wpisany w HTML przez Module.ccall
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void zewnetrzny_input_ai(const char* user_text) {
+    if (!user_text || strlen(user_text) == 0) return;
+    
+    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
+    parse_and_learn_command(user_text, "USER-WEB", 1);
+}
 // ... (main_loop i main pozostają bez zmian)
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
