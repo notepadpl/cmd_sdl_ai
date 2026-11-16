@@ -1,4 +1,3 @@
-// rubik-black.font font.ttf
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <stdio.h>
@@ -7,21 +6,19 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #include <SDL2/SDL.h>
-
+//#include <SDL_image.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
 
 #define OKNO_SZEROKOSC 800
 #define OKNO_WYSOKOSC  600
-#define MAX_FILE_SIZE 4096 
+#define MAX_FILE_SIZE 32768 // Zwiększony bufor na większe strony HTML
 #define MAX_LINES 64
 #define LINE_LEN 256
-// --- DEKLARACJA WSTĘPNA (FORWARD DECLARATION) ---
-void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display);
+
 // --- ZMIENNE GLOBALNE DLA WĄTKÓW I ENTROPII ---
 pthread_mutex_t ocean_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t evo_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -32,7 +29,10 @@ pthread_mutex_t stm_mutex = PTHREAD_MUTEX_INITIALIZER;
 unsigned char *onnx_model_buffer = NULL;
 long onnx_model_size = 0;
 long ocean_index = 0;
-
+typedef struct {
+    float x, y, z;
+    uint8_t b;
+} Węzeł;
 // Bufor na linie tekstowe UI
 char globalOutputLines[MAX_LINES][LINE_LEN];
 int global_output_count = 0;
@@ -52,26 +52,10 @@ void push_to_stm(const char* item) {
     if (stm_count < STM_CAPACITY) stm_count++;
     pthread_mutex_unlock(&stm_mutex);
 }
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
 
-// Ta funkcja odbiera tekst wpisany w HTML przez Module.ccall
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void zewnetrzny_input_ai(const char* user_text) {
-    if (!user_text || strlen(user_text) == 0) return;
-    
-    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
-    parse_and_learn_command(user_text, "USER-WEB", 1);
-}
-unsigned char get_next_ocean_byte();
+unsigned char get_next_ocean_byte(); // deklaracja wstępna
 
-// --- ALFABETY I ZNAKI SPECJALNE ---
-const char* alphabet_pure = "abcdefghijklmnopqrstuvwxyz";
-const char* alphabet_special = "-|><&;";
-const char space_char = ' ';
+
 
 // --- STRUKTURY MICRO-NN ---
 typedef struct {
@@ -102,6 +86,46 @@ unsigned char get_next_ocean_byte() {
     pthread_mutex_unlock(&ocean_mutex);
     return b;
 }
+// --- ALFABETY (CYFRY OSOBNO) ---
+const char* alphabet_pure = "abcdefghijklmnopqrstuvwxyz";
+const char* alphabet_digits = "0123456789";         // Osobna pula cyfr
+const char* alphabet_special = "-|><&;/!?=*+-#@();:'{}";
+const char space_char = ' ';
+
+
+void generate_ai_thought(char* out_buf, int max_len) {
+    pthread_mutex_lock(&evo_mutex);
+    int word_len = 6 + (get_next_ocean_byte() % 12); 
+    if (word_len >= max_len) word_len = max_len - 1;
+
+    int alpha_len = strlen(alphabet_pure);
+    int digit_len = strlen(alphabet_digits);
+    int spec_len = strlen(alphabet_special);
+
+    out_buf[0] = '>';
+    out_buf[1] = ' ';
+    int idx = 2;
+
+    for (int i = 0; i < word_len && idx < max_len - 1; i++) {
+        unsigned char b = get_next_ocean_byte();
+        float activation = sinf(trained_model.w_output[i % 4] + (float)b) * 10.0f;
+        int choice = abs((int)(activation + b)) % 100;
+
+        if (choice < 60) {
+            out_buf[idx++] = alphabet_pure[b % alpha_len];       // 60% szans na literę
+        } else if (choice < 75) {
+            out_buf[idx++] = alphabet_digits[b % digit_len];     // 15% szans na cyfrę!
+        } else if (choice < 90) {
+            out_buf[idx++] = alphabet_special[b % spec_len];     // 15% szans na znak specjalny
+        } else {
+            out_buf[idx++] = space_char;                         // 10% szans na spację
+        }
+    }
+    out_buf[idx] = '\0';
+    pthread_mutex_unlock(&evo_mutex);
+} 
+// --- AUTONOMICZNE DUKANIE PRZEZ AI ---
+
 
 unsigned char cognitive_read_screen_output() {
     pthread_mutex_lock(&ui_mutex);
@@ -146,39 +170,13 @@ void dzin_atomic_molecular_mutation(MicroNeuralNet *net, float ambient_entropy) 
     pthread_mutex_unlock(&evo_mutex);
 }
 
-typedef struct {
-    float x, y, z;
-    uint8_t b;
-} Węzeł;
-
 char* run_system_command(const char* cmd) {
     char *echo = (char*)malloc(MAX_FILE_SIZE);
     if (!echo) return NULL;
     
     char full_cmd[MAX_FILE_SIZE];
-
-#ifdef __EMSCRIPTEN__
-    snprintf(full_cmd, sizeof(full_cmd), "./assets/busybox sh -c \"%s\" > /tmp_out.txt 2>&1", cmd);
-    int ret = system(full_cmd);
-    
-    FILE *f = fopen("/tmp_out.txt", "r");
-    if (f) {
-        size_t r = fread(echo, 1, MAX_FILE_SIZE - 1, f);
-        echo[r] = '\0';
-        fclose(f);
-    } else {
-        snprintf(echo, MAX_FILE_SIZE, "BusyBox execution result (code: %d)\n", ret);
-    }
-#else
-    FILE *test_droidc = fopen("/data/user/0/com.n0n3m4.droidc/files/sh", "r");
-    if (test_droidc) {
-        fclose(test_droidc);
-        snprintf(full_cmd, sizeof(full_cmd), 
-            "export PATH=\"/busybox-virtual:/data/user/0/com.n0n3m4.droidc/files/:$PATH\"; %s 2>&1", cmd);
-    } else {
-        snprintf(full_cmd, sizeof(full_cmd), 
-            "export PATH=\"./busybox-virtual:$PATH\"; %s 2>&1", cmd);
-    }
+    snprintf(full_cmd, sizeof(full_cmd), 
+        "export PATH=\"/busybox-virtual:/data/user/0/com.n0n3m4.droidc/files/:/data/user/0/com.n0n3m4.droidc/files/gcc/bin:$PATH\"; %s 2>&1", cmd);
 
     FILE *fp = popen(full_cmd, "r");
     if (fp == NULL) {
@@ -188,51 +186,131 @@ char* run_system_command(const char* cmd) {
     size_t len = fread(echo, 1, MAX_FILE_SIZE - 1, fp);
     echo[len] = '\0';
     pclose(fp);
-#endif
-
     return echo;
 }
 
-void write_success_state(int gen, const char* source, const char* successful_cmd) {
+// --- FUNKCJA WYCIĄGANIA LINKÓW HTTPS I ZAPISU DO success.html ---
+void extract_and_save_links(const unsigned char *buffer, long size) {
     pthread_mutex_lock(&file_rw_mutex);
-    FILE *sf = fopen("success.txt", "a+");
-    if (sf) {
-        fprintf(sf, "[SUCCESS] GEN: %d | SOURCE: %s | CMD: %s\n", gen, source, successful_cmd);
-        fclose(sf);
-    }
-    pthread_mutex_unlock(&file_rw_mutex);
-}
-
-void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display) {
-    if (!raw_input || strlen(raw_input) == 0) return;
-
-    if (strcmp(raw_input, "-h") == 0 || strcmp(raw_input, "--help") == 0 || strcmp(raw_input, "ia") == 0) {
-        pthread_mutex_lock(&ui_mutex);
-        global_output_count = 0;
-        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "--- STATUS AI & KONSOLA C ---");
-        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "Generacja sieci: %d", trained_model.generation);
-        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "Tryb czystego C / Przesuniecia bitowe aktywne.");
-        pthread_mutex_unlock(&ui_mutex);
+    FILE *sf = fopen("success.html", "a+");
+    if (!sf) {
+        pthread_mutex_unlock(&file_rw_mutex);
         return;
     }
 
-    char temp_buf[256];
-    strncpy(temp_buf, raw_input, sizeof(temp_buf) - 1);
-    temp_buf[sizeof(temp_buf) - 1] = '\0';
+    fprintf(sf, "<hr><h3>Nowe linki z pobranej strony:</h3><ul>\n");
 
-    char parsed_flags[128] = "brak";
-    char paired_files[128] = "brak";
-    
-    char *token = strtok(temp_buf, " ");
-    char base_cmd[64] = "";
-    if (token) strncpy(base_cmd, token, sizeof(base_cmd) - 1);
+    long i = 0;
+    while (i < size - 8) {
+        // Szukamy prefiksu "http://" lub "https://" (wielkość liter ignorowana lub sprawdzana)
+        if ((buffer[i] == 'h' || buffer[i] == 'H') &&
+            (buffer[i+1] == 't' || buffer[i+1] == 'T') &&
+            (buffer[i+2] == 't' || buffer[i+2] == 'T') &&
+            (buffer[i+3] == 'p' || buffer[i+3] == 'P')) {
+            
+            long start = i;
+            long end = start;
+            // Szukamy końca linku (spacja, cudzysłów, nawiasy, znaki końca linii)
+            while (end < size) {
+                char c = (char)buffer[end];
+                if (c == ' ' || c == '"' || c == '\'' || c == '>' || c == '<' || c == '\n' || c == '\r' || c == '\t') {
+                    break;
+                }
+                end++;
+            }
 
-    while ((token = strtok(NULL, " ")) != NULL) {
-        if (token[0] == '-') {
-            strncpy(parsed_flags, token, sizeof(parsed_flags) - 1);
+            long url_len = end - start;
+            if (url_len > 10 && url_len < 512) {
+                char url_str[512];
+                memcpy(url_str, &buffer[start], url_len);
+                url_str[url_len] = '\0';
+
+                // Zapisujemy w formacie pełnego tagu a href do success.html
+                fprintf(sf, "<li><a href=\"%s\" target=\"_blank\">%s</a></li>\n", url_str, url_str);
+            }
+            i = end;
         } else {
-            strncpy(paired_files, token, sizeof(paired_files) - 1);
+            i++;
         }
+    }
+
+    fprintf(sf, "</ul>\n");
+    fclose(sf);
+    pthread_mutex_unlock(&file_rw_mutex);
+}
+
+// --- PODMIANA BUFORA ORAZ URUCHOMIENIE EKSTRAKCJI ---
+void load_new_ocean_source(const char* filepath) {
+    FILE *plik = fopen(filepath, "rb");
+    if (!plik) return;
+
+    fseek(plik, 0, SEEK_END);
+    long new_size = ftell(plik);
+    rewind(plik);
+
+    if (new_size <= 0) {
+        fclose(plik);
+        return;
+    }
+
+    uint8_t *new_buffer = (uint8_t*)malloc(new_size);
+    if (!new_buffer) {
+        fclose(plik);
+        return;
+    }
+
+    fread(new_buffer, 1, new_size, plik);
+    fclose(plik);
+
+    // Automatycznie wyciągnij linki HTTPS/HTTP i zapisz do success.html
+    extract_and_save_links(new_buffer, new_size);
+
+    // Bezpieczna podmiana wskaźnika pod mutexem dla AI (dukania)
+    pthread_mutex_lock(&ocean_mutex);
+    if (onnx_model_buffer) free(onnx_model_buffer);
+    onnx_model_buffer = new_buffer;
+    onnx_model_size = new_size;
+    ocean_index = 0; 
+    pthread_mutex_unlock(&ocean_mutex);
+}
+
+// --- POPRAWIONY PARSER KOMEND Z FORCE_DISPLAY ORAZ FETCH ---
+void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display) {
+    if (!raw_input || strlen(raw_input) == 0) return;
+
+    // Obsługa komendy fetch z internetu
+    if (strncmp(raw_input, "fetch ", 6) == 0) {
+        const char* url = raw_input + 6;
+        char curl_cmd[512];
+        snprintf(curl_cmd, sizeof(curl_cmd), "curl -s -L \"%s\" -o fetched_web.dat", url);
+
+        pthread_mutex_lock(&ui_mutex);
+        global_output_count = 0; // Czyścimy ekran, żeby pokazać status sieci
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[NET] Pobieranie: %s", url);
+        pthread_mutex_unlock(&ui_mutex);
+
+        int ret = system(curl_cmd);
+        if (ret == 0) {
+            load_new_ocean_source("fetched_web.dat"); // Wczytuje i wyciąga linki do success.html
+
+            pthread_mutex_lock(&ui_mutex);
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[NET] Sukces! Zapisano linki do success.html");
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[NET] AI przełaczyło ocean na kod strony.");
+            pthread_mutex_unlock(&ui_mutex);
+        } else {
+            pthread_mutex_lock(&ui_mutex);
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[NET] Blad pobierania strony.");
+            pthread_mutex_unlock(&ui_mutex);
+        }
+        return;
+    }
+
+    if (strcmp(raw_input, "-h") == 0 || strcmp(raw_input, "ia") == 0) {
+        pthread_mutex_lock(&ui_mutex);
+        global_output_count = 0;
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "Wpisz 'fetch <URL>', aby wyciagnac linki i dukać stronę.");
+        pthread_mutex_unlock(&ui_mutex);
+        return;
     }
 
     char *res = run_system_command(raw_input);
@@ -241,7 +319,7 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
 
     if (force_display) {
         pthread_mutex_lock(&ui_mutex);
-        global_output_count = 0;
+        global_output_count = 0; // Czyszczenie ekranu przy komendzie z klawiatury
         snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[%s] $ %s", source_name, raw_input);
 
         if (res) {
@@ -272,23 +350,7 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
 
     if (res) free(res);
 
-    if (!command_failed) {
-        write_success_state(trained_model.generation, source_name, raw_input);
-    }
-
-    float mutation_power = command_failed ? 0.9f : 0.4f;
-    dzin_atomic_molecular_mutation(&trained_model, mutation_power);
-}
-
-void* background_terminal_thread(void* arg) {
-    char input_buf[256];
-    while (fgets(input_buf, sizeof(input_buf), stdin) != NULL) {
-        input_buf[strcspn(input_buf, "\r\n")] = 0;
-        if (strlen(input_buf) > 0) {
-            parse_and_learn_command(input_buf, "TERM-2", 0);
-        }
-    }
-    return NULL;
+    dzin_atomic_molecular_mutation(&trained_model, command_failed ? 0.9f : 0.4f);
 }
 
 struct AppState {
@@ -300,26 +362,81 @@ struct AppState {
     float rotacja;
     int frame_counter;
     int scroll_offset;
-    bool quit;
+    int quit;
 };
 
+void* background_terminal_thread(void* arg) {
+    char input_buf[256];
+    while (fgets(input_buf, sizeof(input_buf), stdin) != NULL) {
+        input_buf[strcspn(input_buf, "\r\n")] = 0;
+        if (strlen(input_buf) > 0) {
+            parse_and_learn_command(input_buf, "TERM-2", 0);
+        }
+    }
+    return NULL;
+}
+// --- BRAKUJĄCA FUNKCJA ZAPISU SUKCESU ---
+void write_success_state(int gen, const char* source, const char* successful_cmd) {
+    pthread_mutex_lock(&file_rw_mutex);
+    FILE *sf = fopen("success.txt", "a+");
+    if (sf) {
+        fprintf(sf, "[SUCCESS] GEN: %d | SOURCE: %s | CMD: %s\n", gen, source, successful_cmd);
+        fclose(sf);
+    }
+    pthread_mutex_unlock(&file_rw_mutex);
+}
+// --- FUNKCJA NAGRODY I SPRAWDZANIA CZY DŽIN WYDUKAŁ KOMENDĘ ---
+void check_and_reward_genie_thought(const char* thought) {
+    char target_cmd[32] = "";
+
+    // Dżin próbuje "wyczarować" komendy systemowe z własnego dukania
+    if (strstr(thought, "ls") != NULL) {
+        strcpy(target_cmd, "ls -la");
+    } else if (strstr(thought, "pwd") != NULL) {
+        strcpy(target_cmd, "pwd");
+    } else if (strstr(thought, "date") != NULL) {
+        strcpy(target_cmd, "date");
+    }
+
+    if (strlen(target_cmd) > 0) {
+        // UDAŁO SIĘ! Dżin wydukał poprawną komendę!
+        pthread_mutex_lock(&ui_mutex);
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[MAGIA] Dzin wydukal komende: %s", target_cmd);
+        pthread_mutex_unlock(&ui_mutex);
+
+        // Wykonaj komendę i wrzuć wyniki na ekran
+        char *res = run_system_command(target_cmd);
+        if (res) {
+            pthread_mutex_lock(&ui_mutex);
+            char *line = strtok(res, "\n");
+            while (line != NULL && global_output_count < MAX_LINES) {
+                snprintf(globalOutputLines[global_output_count++], LINE_LEN, " > %s", line);
+                line = strtok(NULL, "\n");
+            }
+            pthread_mutex_unlock(&ui_mutex);
+            free(res);
+        }
+
+        // NAGRODA DLA SIECI: Pozytywne wzmocnienie (stabilizacja wag, mniejsza mutacja)
+        // Zamiast kary, nagradzamy strukturę, żeby częściej generowała logiczne wzorce
+        dzin_atomic_molecular_mutation(&trained_model, 0.1f); // Bardzo niska entropia = nagroda/stabilizacja
+        
+        // Zapisz sukces do pliku
+        write_success_state(trained_model.generation, "GENIE-MAGIC", target_cmd);
+    }
+}
+// ... (main_loop i main pozostają bez zmian)
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
     SDL_Event e;
     
     while (SDL_PollEvent(&e) != 0) {
-    	
         if (e.type == SDL_QUIT) {
-            state->quit = true;
+            state->quit = 1;
 #ifdef __EMSCRIPTEN__
             emscripten_cancel_main_loop();
 #endif
-        } 
-        // KLUCZOWE DLA WASM: Kliknięcie myszką aktywuje SDL Text Input i fokus klawiatury
-        else if (e.type == SDL_MOUSEBUTTONDOWN) {
-            SDL_StartTextInput();
-        } 
-        else if (e.type == SDL_TEXTINPUT) {
+        } else if (e.type == SDL_TEXTINPUT) {
             size_t len = strlen(state->userInput);
             if (len < 80) {
                 strcat(state->userInput, e.text.text);
@@ -344,7 +461,25 @@ void main_loop(void* arg) {
 
     state->frame_counter++;
 
-    if (state->frame_counter % 180 == 0) {
+    // Automatyczna myśli / pisanie AI co określony czas
+if (state->frame_counter % 120 == 0) {
+        char thought_buf[LINE_LEN];
+        generate_ai_thought(thought_buf, LINE_LEN);
+        
+        // Sprawdzamy, czy Dżin nie wydukał czegoś pożytecznego!
+        check_and_reward_genie_thought(thought_buf);
+
+        pthread_mutex_lock(&ui_mutex);
+        if (global_output_count < MAX_LINES) {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", thought_buf);
+        } else {
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                strcpy(globalOutputLines[i], globalOutputLines[i + 1]);
+            }
+            snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "%s", thought_buf);
+        }
+        pthread_mutex_unlock(&ui_mutex);
+
         dzin_atomic_molecular_mutation(&trained_model, 0.3f);
     }
 
@@ -452,7 +587,7 @@ void main_loop(void* arg) {
 }
 
 int main(int argc, char* args[]) {
-    const char* filename = (argc < 2) ? "assets/network_anomaly.onnx" : args[1];
+    const char* filename = (argc < 2) ? "network_anomaly.onnx" : args[1];
 
     FILE *plik = fopen(filename, "rb+");
     if (!plik) {
@@ -471,7 +606,7 @@ int main(int argc, char* args[]) {
 
     pthread_t term_thread;
     if (pthread_create(&term_thread, NULL, background_terminal_thread, NULL) != 0) {
-        // Cicha obsługa wątku
+        // Cicha obsługa błędu
     } else {
         pthread_detach(term_thread);
     }
@@ -481,13 +616,15 @@ int main(int argc, char* args[]) {
 
     SDL_Window* window = SDL_CreateWindow("Matrix AI Pure C Observer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, OKNO_SZEROKOSC, OKNO_WYSOKOSC, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    TTF_Font* font = TTF_OpenFont("assets/lazy.ttf", 18);
+    
+    TTF_Font* font = TTF_OpenFont("rubik-black.font", 18);
+    if (!font) font = TTF_OpenFont("font.ttf", 18);
     if (!font) font = TTF_OpenFont("lazy.ttf", 18);
 
-   /* SDL_StartTextInput();*/
+    SDL_StartTextInput();
 
     pthread_mutex_lock(&ui_mutex);
-    snprintf(globalOutputLines[global_output_count++], LINE_LEN, "System C uruchomiony. Wpisz 'ia' lub komendę (np. 'ls -la'):");
+    snprintf(globalOutputLines[global_output_count++], LINE_LEN, "System C uruchomiony. AI pisze autonomicznie z alfabetu:");
     pthread_mutex_unlock(&ui_mutex);
 
     int liczba_wezlow = 300; 
@@ -511,7 +648,7 @@ int main(int argc, char* args[]) {
         .rotacja = 0.0f,
         .frame_counter = 0,
         .scroll_offset = 0,
-        .quit = false
+        .quit = 0
     };
 
 #ifdef __EMSCRIPTEN__
