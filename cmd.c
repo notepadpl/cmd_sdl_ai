@@ -8,8 +8,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <SDL2/SDL.h>
-#include<dzin_server.h>
-#include<dzin_client.h>
+#include"dzin_server.h"
+#include"dzin_client.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
