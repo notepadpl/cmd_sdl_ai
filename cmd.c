@@ -1,14 +1,15 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <SDL_net.h>  
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
-
 #include <SDL2/SDL.h>
-//#include <SDL_image.h>
+#include<dzin_server.h>
+#include<dzin_client.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -89,7 +90,7 @@ unsigned char get_next_ocean_byte() {
 // --- ALFABETY (CYFRY OSOBNO) ---
 const char* alphabet_pure = "abcdefghijklmnopqrstuvwxyz";
 const char* alphabet_digits = "0123456789";         // Osobna pula cyfr
-const char* alphabet_special = "-|><&;/!?=*+-#@();:'{}";
+const char* alphabet_special = "-|><&;/!?=";
 const char space_char = ' ';
 
 
@@ -125,8 +126,36 @@ void generate_ai_thought(char* out_buf, int max_len) {
     pthread_mutex_unlock(&evo_mutex);
 } 
 // --- AUTONOMICZNE DUKANIE PRZEZ AI ---
+/*
+void generate_ai_thought(char* out_buf, int max_len) {
+    pthread_mutex_lock(&evo_mutex);
+    int word_len = 6 + (get_next_ocean_byte() % 12); 
+    if (word_len >= max_len) word_len = max_len - 1;
 
+    int alpha_len = strlen(alphabet_pure);
+    int spec_len = strlen(alphabet_special);
 
+    out_buf[0] = '>';
+    out_buf[1] = ' ';
+    int idx = 2;
+
+    for (int i = 0; i < word_len && idx < max_len - 1; i++) {
+        unsigned char b = get_next_ocean_byte();
+        float activation = sinf(trained_model.w_output[i % 4] + (float)b) * 10.0f;
+        int choice = abs((int)(activation + b)) % 100;
+
+        if (choice < 75) {
+            out_buf[idx++] = alphabet_pure[b % alpha_len];
+        } else if (choice < 90) {
+            out_buf[idx++] = alphabet_special[b % spec_len];
+        } else {
+            out_buf[idx++] = space_char;
+        }
+    }
+    out_buf[idx] = '\0';
+    pthread_mutex_unlock(&evo_mutex);
+}
+*/
 unsigned char cognitive_read_screen_output() {
     pthread_mutex_lock(&ui_mutex);
     unsigned char screen_entropy = 0x00;
@@ -425,21 +454,11 @@ void check_and_reward_genie_thought(const char* thought) {
         write_success_state(trained_model.generation, "GENIE-MAGIC", target_cmd);
     }
 }
-// Ta funkcja odbiera tekst wpisany w HTML przez Module.ccall
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void zewnetrzny_input_ai(const char* user_text) {
-    if (!user_text || strlen(user_text) == 0) return;
-    
-    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
-    parse_and_learn_command(user_text, "USER-WEB", 1);
-}
 // ... (main_loop i main pozostają bez zmian)
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
     SDL_Event e;
-    
+  
     while (SDL_PollEvent(&e) != 0) {
         if (e.type == SDL_QUIT) {
             state->quit = 1;
@@ -447,6 +466,7 @@ void main_loop(void* arg) {
             emscripten_cancel_main_loop();
 #endif
         } else if (e.type == SDL_TEXTINPUT) {
+        	   SDL_StartTextInput();
             size_t len = strlen(state->userInput);
             if (len < 80) {
                 strcat(state->userInput, e.text.text);
@@ -468,6 +488,44 @@ void main_loop(void* arg) {
             }
         }
     }
+// --- GIMBERLINK: DIALOG SERWER <-> KLIENT (LOCALHOST) ---
+    char srv_in[LINE_LEN];
+    char cli_in[LINE_LEN];
+    char last_thought[LINE_LEN] = "a4a4";
+
+    // Pobieramy ostatnią myśl Dżina, żeby Serwer miał co odesłać Klientowi
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count > 0) {
+        strncpy(last_thought, globalOutputLines[global_output_count - 1], LINE_LEN - 1);
+        last_thought[LINE_LEN - 1] = '\0';
+    }
+    pthread_mutex_unlock(&ui_mutex);
+
+    // 1. Serwer nasłuchuje: jeśli Klient coś wysłał, wrzucamy w pamięć STM i odsyłamy last_thought
+    if (dzin_server_update(srv_in, LINE_LEN, last_thought)) {
+        push_to_stm(srv_in);
+        dzin_atomic_molecular_mutation(&trained_model, 0.25f);
+    }
+
+    // 2. Klient nasłuchuje: jeśli Serwer odesłał odpowiedź, wyświetlamy ją na ekranie jako [GIMBERLINK]
+    if (dzin_client_update(cli_in, LINE_LEN)) {
+        push_to_stm(cli_in);
+
+        pthread_mutex_lock(&ui_mutex);
+        if (global_output_count < MAX_LINES) {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[GIMBERLINK] %s", cli_in);
+        } else {
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                strcpy(globalOutputLines[i], globalOutputLines[i + 1]);
+            }
+            snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "[GIMBERLINK] %s", cli_in);
+        }
+        pthread_mutex_unlock(&ui_mutex);
+    }
+    // --------------------------------------------------------
+
+    state->frame_counter++;
+    // ----------------------------------------------
 
     state->frame_counter++;
 
@@ -475,7 +533,7 @@ void main_loop(void* arg) {
 if (state->frame_counter % 120 == 0) {
         char thought_buf[LINE_LEN];
         generate_ai_thought(thought_buf, LINE_LEN);
-        
+        dzin_client_send(thought_buf);
         // Sprawdzamy, czy Dżin nie wydukał czegoś pożytecznego!
         check_and_reward_genie_thought(thought_buf);
 
@@ -555,7 +613,10 @@ if (state->frame_counter % 120 == 0) {
 
         pthread_mutex_lock(&ui_mutex);
         int start_idx = state->scroll_offset;
+        int visible_lines = 22; // ile linii mieści się na ekranie 600px
         if (start_idx >= global_output_count) start_idx = global_output_count > 0 ? global_output_count - 1 : 0;
+
+start_idx = (global_output_count > visible_lines) ? (global_output_count - visible_lines) : 0;
 
         for (int i = start_idx; i < global_output_count; i++) {
             if (strlen(globalOutputLines[i]) == 0) continue;
@@ -582,7 +643,6 @@ if (state->frame_counter % 120 == 0) {
         int cursorVisible = ((state->frame_counter / 30) % 2) == 0;
         char promptLine[300];
         snprintf(promptLine, sizeof(promptLine), "> %s%s", state->userInput, cursorVisible ? "_" : " ");
-
         SDL_Surface* inputSurface = TTF_RenderText_Solid(state->font, promptLine, inputTextColor);
         if (inputSurface) {
             SDL_Texture* inputTexture = SDL_CreateTextureFromSurface(state->renderer, inputSurface);
@@ -613,7 +673,7 @@ int main(int argc, char* args[]) {
         fread(onnx_model_buffer, 1, onnx_model_size, plik);
         fclose(plik);
     }
-
+     
     pthread_t term_thread;
     if (pthread_create(&term_thread, NULL, background_terminal_thread, NULL) != 0) {
         // Cicha obsługa błędu
@@ -630,9 +690,10 @@ int main(int argc, char* args[]) {
     TTF_Font* font = TTF_OpenFont("rubik-black.font", 18);
     if (!font) font = TTF_OpenFont("font.ttf", 18);
     if (!font) font = TTF_OpenFont("assets/lazy.ttf", 18);
-
-    SDL_StartTextInput();
-
+//83.29.170.125
+ //   SDL_StartTextInput();
+ dzin_server_init(4444);
+dzin_client_init("127.0.0.2",4444);
     pthread_mutex_lock(&ui_mutex);
     snprintf(globalOutputLines[global_output_count++], LINE_LEN, "System C uruchomiony. AI pisze autonomicznie z alfabetu:");
     pthread_mutex_unlock(&ui_mutex);
@@ -648,7 +709,7 @@ int main(int argc, char* args[]) {
         siec[i].z = sinf(kat_siatki) * 120.0f + ((i / 5) % 5) * 20.0f;
         siec[i].b = onnx_model_buffer[idx % onnx_model_size];
     }
-
+SDL_StartTextInput();
     struct AppState state = {
         .renderer = renderer,
         .font = font,
@@ -675,6 +736,9 @@ int main(int argc, char* args[]) {
     if (font) TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+    dzin_client_close();
+    dzin_server_close();
+//    SDLNet_SocketSet dzin_sock_set = NULL;
     TTF_Quit();
     SDL_Quit();
 #endif
