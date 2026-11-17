@@ -8,8 +8,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <SDL2/SDL.h>
-#include"dzin_server.h"
-#include"dzin_client.h"
+#include<dzin_server.h>
+#include<dzin_client.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -455,6 +455,15 @@ void check_and_reward_genie_thought(const char* thought) {
     }
 }
 // ... (main_loop i main pozostają bez zmian)
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void zewnetrzny_input_ai(const char* user_text) {
+    if (!user_text || strlen(user_text) == 0) return;
+    
+    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
+    parse_and_learn_command(user_text, "USER-WEB", 1);
+}
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
     SDL_Event e;
