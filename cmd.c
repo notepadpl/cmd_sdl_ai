@@ -8,8 +8,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <SDL2/SDL.h>
-#include<dzin_server.h>
-#include<dzin_client.h>
+#include"dzin_server.h"
+#include"dzin_client.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -19,7 +19,7 @@
 #define MAX_FILE_SIZE 32768 // Zwiększony bufor na większe strony HTML
 #define MAX_LINES 64
 #define LINE_LEN 256
-
+void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display);
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
