@@ -20,6 +20,15 @@
 #define MAX_LINES 64
 #define LINE_LEN 256
 
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void zewnetrzny_input_ai(const char* user_text) {
+    if (!user_text || strlen(user_text) == 0) return;
+    
+    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
+    parse_and_learn_command(user_text, "USER-WEB", 1);
+}
 // --- ZMIENNE GLOBALNE DLA WĄTKÓW I ENTROPII ---
 pthread_mutex_t ocean_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t evo_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -455,15 +464,7 @@ void check_and_reward_genie_thought(const char* thought) {
     }
 }
 // ... (main_loop i main pozostają bez zmian)
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void zewnetrzny_input_ai(const char* user_text) {
-    if (!user_text || strlen(user_text) == 0) return;
-    
-    // Przekazujesz tekst do swojej funkcji parsującej/wykonawczej
-    parse_and_learn_command(user_text, "USER-WEB", 1);
-}
+
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
     SDL_Event e;
@@ -664,6 +665,7 @@ start_idx = (global_output_count > visible_lines) ? (global_output_count - visib
 
     SDL_RenderPresent(state->renderer);
 }
+
 
 int main(int argc, char* args[]) {
     const char* filename = (argc < 2) ? "assets/network_anomaly.onnx" : args[1];
