@@ -183,25 +183,7 @@ void init_html_report(const char *filename, const char *host) {
     
     fclose(f);
 }
-void append_html_row(const char *filename, const char *target, int status_code, int is_reflected, float anomaly_score) {
-    FILE *f = fopen(filename, "a");
-    if (!f) return;
-    
-    fprintf(f, "<tr>\n");
-    fprintf(f, "<td><code>%s</code></td>\n", target);
-    fprintf(f, "<td><strong>%d</strong></td>\n", status_code);
-    
-    if (is_reflected) {
-        fprintf(f, "<td><span class=\"badge-red\">TAK (POTENCJALNY XSS)</span></td>\n");
-    } else {
-        fprintf(f, "<td><span class=\"badge-green\">BRAK</span></td>\n");
-    }
-    
-    fprintf(f, "<td>%.2f%%</td>\n", anomaly_score * 100.0f);
-    fprintf(f, "</tr>\n");
-    
-    fclose(f);
-}
+
 
 void append_html_row(const char *filename, const char *host, const char *full_target, int status_code, int is_reflected, float anomaly_percentage) {
     FILE *f = fopen(filename, "a");
