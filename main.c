@@ -207,7 +207,7 @@ void main_loop(void* arg) {
 }
 
 int main(int argc, char* args[]) {
-    const char* filename = (argc < 2) ? "network_anomaly.onnx" : args[1];
+    const char* filename = (argc < 2) ? "assets/network_anomaly.onnx" : args[1];
 
     FILE *plik = fopen(filename, "rb+");
     if (!plik) {
@@ -252,7 +252,7 @@ int main(int argc, char* args[]) {
 
     TTF_Font* font = TTF_OpenFont("rubik-black.font", 18);
     if (!font) font = TTF_OpenFont("font.ttf", 18);
-    if (!font) font = TTF_OpenFont("lazy.ttf", 18);
+    if (!font) font = TTF_OpenFont("assets/lazy.ttf", 18);
 
     dzin_server_init(4444);
     dzin_client_init("127.0.0.1", 4444);
