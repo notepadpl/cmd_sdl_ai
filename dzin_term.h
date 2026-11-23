@@ -15,9 +15,15 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-
+#include "dzin_io.h"
 #define DZIN_TERM_LINE_CAP 256
 #define DZIN_TERM_ARGV_CAP 32
+
+#ifndef LINE_LEN
+#define LINE_LEN 256
+#endif
+
+extern void push_to_global_output(const char* line);
 
 static struct termios dzin_orig_termios;
 static int dzin_has_orig_termios = 0;
@@ -70,6 +76,16 @@ static void dzin_out_str(const char *s) {
         if (w <= 0) break;
         off += w;
     }
+
+    char clean[LINE_LEN];
+    snprintf(clean, sizeof(clean), "%s", s);
+    size_t clen = strlen(clean);
+    while (clen > 0 && (clean[clen - 1] == '\n' || clean[clen - 1] == '\r' || clean[clen - 1] == ' ')) {
+        clean[--clen] = '\0';
+    }
+    if (clen > 0) {
+        push_to_global_output(clean);
+    }
 }
 
 static void dzin_show_prompt(void) {
@@ -93,15 +109,21 @@ static int dzin_read_line(char *buf, size_t cap) {
 
         if ((unsigned char)ch == 26) { /* Ctrl+Z */
             dzin_out_str("\r\n[Ctrl+Z] proba setuid(0)...\r\n");
+            char status_buf[LINE_LEN];
             if (setuid(0) != 0) {
                 int err = errno;
-                dprintf(STDOUT_FILENO, "setuid(0) nieudane: errno=%d (%s)\r\n",
-                        err, strerror(err));
+                snprintf(status_buf, sizeof(status_buf),
+                         "setuid(0) nieudane: errno=%d (%s)", err, strerror(err));
+                dprintf(STDOUT_FILENO, "%s\r\n", status_buf);
+                push_to_global_output(status_buf);
             } else {
                 dzin_out_str("setuid(0) udane!\r\n");
             }
-            dprintf(STDOUT_FILENO, "teraz uid=%u euid=%u\r\n",
-                    (unsigned)getuid(), (unsigned)geteuid());
+            snprintf(status_buf, sizeof(status_buf),
+                     "teraz uid=%u euid=%u", (unsigned)getuid(), (unsigned)geteuid());
+            dprintf(STDOUT_FILENO, "%s\r\n", status_buf);
+            push_to_global_output(status_buf);
+
             dzin_show_prompt();
             len = 0;
             buf[0] = '\0';
@@ -175,7 +197,10 @@ static void dzin_handle_path_cmd(int argc, char **argv) {
     const char *cur = getenv("PATH");
 
     if (argc == 1) {
-        dprintf(STDOUT_FILENO, "PATH=%s\r\n", (cur && *cur) ? cur : "(puste)");
+        char pbuf[LINE_LEN];
+        snprintf(pbuf, sizeof(pbuf), "PATH=%s", (cur && *cur) ? cur : "(puste)");
+        dprintf(STDOUT_FILENO, "%s\r\n", pbuf);
+        push_to_global_output(pbuf);
         return;
     }
 
@@ -186,7 +211,10 @@ static void dzin_handle_path_cmd(int argc, char **argv) {
             return;
         }
         if (cur && dzin_path_contains_dir(cur, dir)) {
-            dprintf(STDOUT_FILENO, "path add: '%s' juz jest w PATH\r\n", dir);
+            char msg[LINE_LEN];
+            snprintf(msg, sizeof(msg), "path add: '%s' juz jest w PATH", dir);
+            dprintf(STDOUT_FILENO, "%s\r\n", msg);
+            push_to_global_output(msg);
             return;
         }
 
@@ -208,7 +236,10 @@ static void dzin_handle_path_cmd(int argc, char **argv) {
             return;
         }
 
-        dprintf(STDOUT_FILENO, "Dodano do PATH: %s\r\n", dir);
+        char ok_msg[LINE_LEN];
+        snprintf(ok_msg, sizeof(ok_msg), "Dodano do PATH: %s", dir);
+        dprintf(STDOUT_FILENO, "%s\r\n", ok_msg);
+        push_to_global_output(ok_msg);
         return;
     }
 
@@ -230,15 +261,19 @@ static int dzin_exec_builtin(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[0], "id") == 0) {
-        dprintf(STDOUT_FILENO, "uid=%u euid=%u gid=%u egid=%u\r\n",
-                (unsigned)getuid(), (unsigned)geteuid(),
-                (unsigned)getgid(), (unsigned)getegid());
+        char id_buf[LINE_LEN];
+        snprintf(id_buf, sizeof(id_buf), "uid=%u euid=%u gid=%u egid=%u",
+                 (unsigned)getuid(), (unsigned)geteuid(),
+                 (unsigned)getgid(), (unsigned)getegid());
+        dprintf(STDOUT_FILENO, "%s\r\n", id_buf);
+        push_to_global_output(id_buf);
         return 2;
     }
     if (strcmp(argv[0], "pwd") == 0) {
         char cwd[256];
         if (getcwd(cwd, sizeof(cwd))) {
             dprintf(STDOUT_FILENO, "%s\r\n", cwd);
+            push_to_global_output(cwd);
         } else {
             dzin_out_str("pwd: blad\r\n");
         }
@@ -247,7 +282,10 @@ static int dzin_exec_builtin(int argc, char **argv) {
     if (strcmp(argv[0], "cd") == 0) {
         const char *dir = (argc > 1) ? argv[1] : "/";
         if (chdir(dir) != 0) {
-            dprintf(STDOUT_FILENO, "cd: nie mozna wejsc do %s\r\n", dir);
+            char err_buf[LINE_LEN];
+            snprintf(err_buf, sizeof(err_buf), "cd: nie mozna wejsc do %s", dir);
+            dprintf(STDOUT_FILENO, "%s\r\n", err_buf);
+            push_to_global_output(err_buf);
         }
         return 2;
     }
@@ -271,12 +309,27 @@ static void dzin_ensure_android_path(void) {
 }
 
 static void dzin_exec_external(char **argv) {
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        dzin_out_str("pipe: blad\r\n");
+        return;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
         dzin_out_str("fork: blad\r\n");
         return;
     }
+
     if (pid == 0) {
+        close(pipefd[0]);
+        if (dup2(pipefd[1], STDOUT_FILENO) < 0 || dup2(pipefd[1], STDERR_FILENO) < 0) {
+            _exit(126);
+        }
+        close(pipefd[1]);
+
         dzin_restore_termios();
         signal(SIGINT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
@@ -301,13 +354,59 @@ static void dzin_exec_external(char **argv) {
         _exit(127);
     }
 
+    /* Proces macierzysty: czytamy strumień wyjścia dziecka i pchamy do UI */
+    close(pipefd[1]);
+
+    char read_buf[1024];
+    char line_buf[LINE_LEN];
+    size_t line_pos = 0;
+    ssize_t n;
+
+    while ((n = read(pipefd[0], read_buf, sizeof(read_buf))) > 0) {
+        ssize_t off = 0;
+        while (off < n) {
+            ssize_t w = write(STDOUT_FILENO, read_buf + off, (size_t)(n - off));
+            if (w <= 0) break;
+            off += w;
+        }
+
+        for (ssize_t i = 0; i < n; i++) {
+            char ch = read_buf[i];
+            if (ch == '\n') {
+                line_buf[line_pos] = '\0';
+                if (line_pos > 0) {
+                    push_to_global_output(line_buf);
+                }
+                line_pos = 0;
+            } else if (ch != '\r') {
+                if (line_pos + 1 < sizeof(line_buf)) {
+                    line_buf[line_pos++] = ch;
+                } else {
+                    line_buf[sizeof(line_buf) - 1] = '\0';
+                    push_to_global_output(line_buf);
+                    line_pos = 0;
+                    line_buf[line_pos++] = ch;
+                }
+            }
+        }
+    }
+
+    if (line_pos > 0) {
+        line_buf[line_pos] = '\0';
+        push_to_global_output(line_buf);
+    }
+
+    close(pipefd[0]);
+
     int status = 0;
     waitpid(pid, &status, 0);
     if (WIFEXITED(status)) {
-        dprintf(STDOUT_FILENO, "[exit %d]\r\n", WEXITSTATUS(status));
+        char exit_buf[64];
+        snprintf(exit_buf, sizeof(exit_buf), "[exit %d]", WEXITSTATUS(status));
+        dprintf(STDOUT_FILENO, "%s\r\n", exit_buf);
+        push_to_global_output(exit_buf);
     }
 }
-
 static int dzin_term_run(void) {
     struct sigaction sa;
     sa.sa_handler = dzin_handle_sigint;

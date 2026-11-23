@@ -8,6 +8,8 @@
 #include "press.h"
 #include "sip_mod.h"
 #include "dzin_netstat.h"
+#include "dzin_term.h"
+void push_to_global_output(const char* line);
 void push_to_global_output(const char* line) {
     if (!line) return;
     pthread_mutex_lock(&ui_mutex);
@@ -141,7 +143,67 @@ void load_new_ocean_source(const char* filepath) {
     ocean_index = 0; 
     pthread_mutex_unlock(&ocean_mutex);
 }
+typedef struct {
+    char *cmd;
+} TermArgs;
 
+static void* dzin_term_thread_func(void* arg) {
+    TermArgs *targs = (TermArgs*)arg;
+    char *raw = (targs && targs->cmd) ? targs->cmd : NULL;
+
+    /* Pomijamy wiodące "term" */
+    const char *args_part = "";
+    if (raw) {
+        if (strncmp(raw, "term ", 5) == 0) {
+            args_part = raw + 5;
+            while (*args_part == ' ' || *args_part == '\t') {
+                args_part++;
+            }
+        }
+    }
+
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count < MAX_LINES) {
+        if (*args_part != '\0') {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[TERM] Start w tle: %s", args_part);
+        } else {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[TERM] Start terminala w tle...");
+        }
+    }
+    pthread_mutex_unlock(&ui_mutex);
+
+    int rc = 0;
+
+    if (*args_part != '\0') {
+        char line_copy[DZIN_TERM_LINE_CAP];
+        snprintf(line_copy, sizeof(line_copy), "%s", args_part);
+
+        char *argv_term[DZIN_TERM_ARGV_CAP];
+        int argc_term = dzin_split_argv(line_copy, argv_term, DZIN_TERM_ARGV_CAP);
+
+        if (argc_term > 0) {
+            dzin_ensure_android_path();
+            int builtin_rc = dzin_exec_builtin(argc_term, argv_term);
+            if (builtin_rc == 0) {
+                dzin_exec_external(argv_term);
+            }
+        }
+    } else {
+        rc = dzin_term_run();
+    }
+
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count < MAX_LINES) {
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[TERM] Zakonczono (kod: %d).", rc);
+    }
+    pthread_mutex_unlock(&ui_mutex);
+
+    if (targs) {
+        free(targs->cmd);
+        free(targs);
+    }
+    return NULL;
+}
 void* server_thread_func(void* arg) {
     int port = *(int*)arg;
     free(arg);
@@ -153,10 +215,79 @@ void* server_thread_func(void* arg) {
     serverc(2, argv_server);
     return NULL;
 }
+static int press_running = 0;
 
+typedef struct {
+    char *cmd;
+} PressArgs;
+
+static void append_ui_line(const char *msg) {
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count < MAX_LINES) {
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", msg);
+    }
+    pthread_mutex_unlock(&ui_mutex);
+}
+
+static void *press_thread_func(void *arg) {
+    PressArgs *pargs = (PressArgs *)arg;
+    char *cmd = pargs ? pargs->cmd : NULL;
+    free(pargs);
+
+    append_ui_line("[PRESS] Inicjalizacja skanera...");
+
+    if (cmd) {
+        char *argv_press[4] = { NULL, NULL, NULL, NULL };
+        int argc_press = 0;
+        char *saveptr = NULL;
+        char *token = strtok_r(cmd, " ", &saveptr);
+
+        while (token != NULL && argc_press < 3) {
+            argv_press[argc_press++] = token;
+            token = strtok_r(NULL, " ", &saveptr);
+        }
+
+        press(argc_press, argv_press);
+        free(cmd);
+    }
+
+    pthread_mutex_lock(&ui_mutex);
+    press_running = 0;
+    if (global_output_count < MAX_LINES) {
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN,
+                 "[PRESS] Zakonczono! Sprawdz report.html");
+    }
+    pthread_mutex_unlock(&ui_mutex);
+
+    return NULL;
+}
 void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display) {
     if (!raw_input || strlen(raw_input) == 0) return;
+// Komenda TERM (z opcjonalnymi argumentami, w tle bez blokowania głównego wątku)
+    if (strcmp(raw_input, "term") == 0 || strncmp(raw_input, "term ", 5) == 0) {
+        TermArgs *targs = (TermArgs*)malloc(sizeof(TermArgs));
+        if (!targs) return;
 
+        targs->cmd = strdup(raw_input);
+        if (!targs->cmd) {
+            free(targs);
+            return;
+        }
+
+        pthread_t tth;
+        if (pthread_create(&tth, NULL, dzin_term_thread_func, targs) == 0) {
+            pthread_detach(tth);
+        } else {
+            free(targs->cmd);
+            free(targs);
+            pthread_mutex_lock(&ui_mutex);
+            if (global_output_count < MAX_LINES) {
+                snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[TERM] Blad tworzenia watku.");
+            }
+            pthread_mutex_unlock(&ui_mutex);
+        }
+        return;
+    }
     // 1. Komenda SERVER (w tle)
     if (strcmp(raw_input, "server") == 0 || strncmp(raw_input, "server ", 7) == 0) {
         int custom_port = 8080;
@@ -183,41 +314,38 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
         return;
     }
 
-    // 2. Komenda PRESS
-    if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
-        pthread_mutex_lock(&ui_mutex);
-        if (global_output_count < MAX_LINES) {
-            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[PRESS] Inicjalizacja skanera...");
-        }
-        pthread_mutex_unlock(&ui_mutex);
+if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
+	/*c++ PressArgs *pargs = (PressArgs *)malloc(sizeof(PressArgs));*/
+    PressArgs *pargs = malloc(sizeof(PressArgs));
+    if (!pargs) return;
 
-        char input_copy[512];
-        strncpy(input_copy, raw_input, sizeof(input_copy));
-        input_copy[sizeof(input_copy) - 1] = '\0';
-
-        char *argv_press[3] = { NULL, NULL, NULL };
-        int argc_press = 0;
-        char *token = strtok(input_copy, " ");
-        while (token != NULL && argc_press < 3) {
-            argv_press[argc_press++] = token;
-            token = strtok(NULL, " ");
-        }
-
-        press(argc_press, argv_press);
-
-        pthread_mutex_lock(&ui_mutex);
-        if (global_output_count < MAX_LINES) {
-            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[PRESS] Zakonczono! Sprawdz report.html");
-        }
-        pthread_mutex_unlock(&ui_mutex);
+    pargs->cmd = strdup(raw_input);
+    if (!pargs->cmd) {
+        free(pargs);
         return;
     }
 
+    pthread_t pth;
+    if (pthread_create(&pth, NULL, press_thread_func, pargs) == 0) {
+        pthread_detach(pth);
+    } else {
+        free(pargs->cmd);
+        free(pargs);
+    }
+    return;
+}
+
     // 3. Komenda SIP
+// 3. Komenda SIP
     if (strncmp(raw_input, "sip ", 4) == 0 || strcmp(raw_input, "sip") == 0) {
         pthread_mutex_lock(&ui_mutex);
         if (global_output_count < MAX_LINES) {
             snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[SIP] Inicjalizacja modulu SIP...");
+        } else if (MAX_LINES > 0) {
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
+            }
+            snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "[SIP] Inicjalizacja modulu SIP...");
         }
         pthread_mutex_unlock(&ui_mutex);
 
@@ -225,24 +353,41 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
         strncpy(input_copy, raw_input, sizeof(input_copy));
         input_copy[sizeof(input_copy) - 1] = '\0';
 
-        char *argv_sip[3] = { NULL, NULL, NULL };
+        // Maksymalnie 8 argumentów + końcowy NULL dla zgodności ze standardowym argv
+        char *argv_sip[9] = { NULL };
         int argc_sip = 0;
         char *token = strtok(input_copy, " ");
-        while (token != NULL && argc_sip < 3) {
+        while (token != NULL && argc_sip < 8) {
             argv_sip[argc_sip++] = token;
             token = strtok(NULL, " ");
         }
+        argv_sip[argc_sip] = NULL;
+
+        pthread_mutex_lock(&ui_mutex);
+        if (global_output_count < MAX_LINES) {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[SIP] Przekazano argumentow (argc): %d", argc_sip);
+        } else if (MAX_LINES > 0) {
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
+            }
+            snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "[SIP] Przekazano argumentow (argc): %d", argc_sip);
+        }
+        pthread_mutex_unlock(&ui_mutex);
 
         sip_main(argc_sip, argv_sip);
 
         pthread_mutex_lock(&ui_mutex);
         if (global_output_count < MAX_LINES) {
             snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[SIP] Zakonczono! Sprawdz index.html");
+        } else if (MAX_LINES > 0) {
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
+            }
+            snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "[SIP] Zakonczono! Sprawdz index.html");
         }
         pthread_mutex_unlock(&ui_mutex);
         return;
     }
-
     // 4. Komenda NETSTAT (linki IP/porty do netstat.html)
     if (strcmp(raw_input, "netstat") == 0) {
         char info[LINE_LEN];
