@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix AI Terminal - C & WebAssembly</title>
+    <style>
+        body {
+            background-color: #000000;
+            color: #00ff00;
+            font-family: monospace;
+            margin: 0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+            gap: 10px;
+        }
+        .input-container {
+            width: 100%;
+            max-width: 750px;
+            display: flex;
+            gap: 5px;
+            order: 1;
+        }
+        #terminal-input {
+            flex-grow: 1;
+            background-color: #050505;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 16px;
+            padding: 8px;
+            border-radius: 4px;
+            outline: none;
+        }
+        #send-btn {
+            background-color: #002200;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            font-family: monospace;
+            font-weight: bold;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #send-btn:active {
+            background-color: #00ff00;
+            color: #000;
+        }
+        .emscripten_border {
+            border: 2px solid #00ff00;
+            background-color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+            border-radius: 4px;
+            width: 100%;
+            max-width: 750px;
+            order: 2;
+        }
+        #canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+            outline: none;
+            background-color: #000000;
+        }
+        .output-container {
+            width: 100%;
+            max-width: 750px;
+            border: 1px solid #00aa00;
+            background-color: #040a04;
+            border-radius: 4px;
+            padding: 8px;
+            box-sizing: border-box;
+            order: 3;
+        }
+        .output-header {
+            font-size: 12px;
+            color: #77ff77;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #clear-out-btn {
+            background: #001800;
+            color: #00ff00;
+            border: 1px solid #008800;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #terminal-output {
+            margin: 0;
+            height: 170px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 13px;
+            line-height: 1.35;
+        }
+        .out-err {
+            color: #ff6666;
+        }
+        .out-sys {
+            color: #88ff88;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Pasek wpisywania (POST + Wasm) na górze -->
+    <div class="input-container">
+        <input type="text" id="terminal-input" placeholder="Wpisz komendę (POST -> Wasm)..." autocomplete="off">
+        <button id="send-btn" onclick="wyslijKomende()">POST</button>
+    </div>
+
+    <!-- 2. Okno SDL / Canvas / Wasm w środku -->
+    <div class="emscripten_border">
+        <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    </div>
+
+    <!-- 3. Panel Output pod spodem -->
+    <div class="output-container">
+        <div class="output-header">
+            <span>OUTPUT (WASM / POST BRIDGE)</span>
+            <button id="clear-out-btn" onclick="wyczyscOutput()">WYCZYŚĆ</button>
+        </div>
+        <pre id="terminal-output"></pre>
+    </div>
+
+    <script type='text/javascript'>
+        // Dopasuj adresy do swojego serwera (np. http://127.0.0.1:8080/upload/post)
+        const POST_URL = '/upload/post';
+        const POLL_URL = '/latest-post';
+
+        let lastExternalMsg = null;
+
+        function dopiszOutput(text, cls = '') {
+            const out = document.getElementById('terminal-output');
+            const line = document.createElement('div');
+            if (cls) line.className = cls;
+            line.textContent = text;
+            out.appendChild(line);
+            out.scrollTop = out.scrollHeight;
+        }
+
+        function wyczyscOutput() {
+            document.getElementById('terminal-output').innerHTML = '';
+        }
+
+        function przekazDoWasm(val) {
+            if (typeof Module !== 'undefined' && typeof Module.ccall === 'function') {
+                Module.ccall('zewnetrzny_input_ai', null, ['string'], [val]);
+                dopiszOutput('[WASM <-] ' + val, 'out-sys');
+                return true;
+            }
+            dopiszOutput('[ERR] Module.ccall nie jest jeszcze gotowy!', 'out-err');
+            return false;
+        }
+
+        var Module = {
+            preRun: [],
+            postRun: [],
+            print: function(text) {
+                console.log("[WASM OUT]: " + text);
+                dopiszOutput('[OUT] ' + text);
+            },
+            printErr: function(text) {
+                console.error("[WASM ERR]: " + text);
+                dopiszOutput('[ERR] ' + text, 'out-err');
+            },
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                return canvas;
+            })()
+        };
+
+        // Wysyłka metodą POST + przekazanie do Wasm
+        async function wyslijKomende() {
+            const input = document.getElementById('terminal-input');
+            const val = input.value.trim();
+            if (!val) return;
+
+            input.value = '';
+            dopiszOutput('[POST ->] ' + val, 'out-sys');
+
+            try {
+                const resp = await fetch(POST_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                    body: val
+                });
+                if (!resp.ok) {
+                    dopiszOutput('[POST WARN] HTTP ' + resp.status, 'out-err');
+                }
+            } catch (err) {
+                dopiszOutput('[POST FAIL] ' + err.message + ' (wywołuję lokalnie Wasm)', 'out-err');
+            }
+
+            przekazDoWasm(val);
+        }
+
+        // Odbiór nowych danych zapisanych np. przez `curl -X POST` do pliku /upload/post
+        async function pollIncomingPost() {
+            try {
+                const resp = await fetch(POLL_URL, { cache: 'no-store' });
+                if (!resp.ok) return;
+                const text = (await resp.text()).trim();
+                if (text && text !== lastExternalMsg) {
+                    lastExternalMsg = text;
+                    dopiszOutput('[CURL/FILE] ' + text, 'out-sys');
+                    przekazDoWasm(text);
+                }
+            } catch (_) {
+                // Cichy ignor przy braku endpointu odczytu w trybie statycznym
+            }
+        }
+
+        document.getElementById('terminal-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                wyslijKomende();
+            }
+        });
+
+        setInterval(pollIncomingPost, 1000);
+    </script>
+
+    {{{ SCRIPT }}}
+
+</body>
+</html>
