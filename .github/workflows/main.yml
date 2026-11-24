@@ -5,14 +5,13 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
 
-# Wymagane uprawnienia do wrzucania strony na GitHub Pages
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
-# Zapobiega nakładaniu się wielu wdrożeń naraz
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -22,18 +21,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Pobranie kodu źródłowego projektu
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      # 2. Instalacja i konfiguracja Emscripten SDK (z użyciem cache)
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: latest
           actions-cache-folder: 'emsdk-cache'
 
-      # 3. Kompilacja projektu z Twoim plikiem shell.html
       - name: Compile with Emcc
         run: |
           mkdir -p build
@@ -41,12 +39,26 @@ jobs:
             -s USE_SDL=2 \
             -s USE_SDL_TTF=2 \
             -s USE_SDL_NET=2 \
-            -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -s EXPORTED_FUNCTIONS='["_main","_zewnetrzny_input_ai"]' \
+            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString"]' \
             --preload-file assets \
             --shell-file shell.html \
             -O3
 
-      # 4. Spakowanie i wysłanie jako tradycyjny Artifact (ZIP)
+      - name: Commit build artifacts to repository
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f build/
+          if git diff --staged --quiet; then
+            echo "Brak zmian w katalogu build/ do commitowania."
+          else
+            git commit -m "chore(build): aktualizuj pliki kompilacji Wasm [skip ci]"
+            git push
+          fi
+
       - name: Upload WebAssembly Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -54,17 +66,14 @@ jobs:
           path: build/
           retention-days: 7
 
-      # 5. Konfiguracja GitHub Pages
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # 6. Przygotowanie paczki pod GitHub Pages z folderu build
       - name: Upload artifact for GitHub Pages
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: 'build'
 
-      # 7. Właściwy Deploy (publikacja strony online)
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
