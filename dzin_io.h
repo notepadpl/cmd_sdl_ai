@@ -10,6 +10,7 @@
 #include "dzin_netstat.h"
 #include "dzin_term.h"
 void push_to_global_output(const char* line);
+/*
 void push_to_global_output(const char* line) {
     if (!line) return;
     pthread_mutex_lock(&ui_mutex);
@@ -23,6 +24,7 @@ void push_to_global_output(const char* line) {
     }
     pthread_mutex_unlock(&ui_mutex);
 }
+*/
 char* run_system_command(const char* cmd) {
     char full_cmd[2048];
     snprintf(full_cmd, sizeof(full_cmd), 
@@ -67,6 +69,36 @@ char* run_system_command(const char* cmd) {
     return buffer;
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+EM_JS(void, js_on_dzin_reply, (const char* msg), {
+    if (!msg) return;
+    const text = UTF8ToString(msg);
+    if (typeof window.onDzinReply === 'function') {
+        window.onDzinReply(text);
+    }
+});
+#endif
+
+
+void push_to_global_output(const char* line) {
+    if (!line) return;
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count < MAX_LINES) {
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", line);
+    } else {
+        for (int i = 0; i < MAX_LINES - 1; i++) {
+            snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
+        }
+        snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "%s", line);
+    }
+    pthread_mutex_unlock(&ui_mutex);
+
+#ifdef __EMSCRIPTEN__
+    js_on_dzin_reply(line);
+#endif
+}
 void extract_and_save_links(const unsigned char *buffer, long size) {
     pthread_mutex_lock(&file_rw_mutex);
     FILE *sf = fopen("success.html", "a+");

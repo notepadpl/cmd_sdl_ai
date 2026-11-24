@@ -164,6 +164,20 @@
             return false;
         }
 
+        // Odpowiedzi wychodzące z Wasm (przez EM_JS -> window.onDzinReply)
+        window.onDzinReply = function(text) {
+            dopiszOutput('[DZIN ->] ' + text, 'out-sys');
+
+            // Opcjonalnie: wysyłka odpowiedzi do innego okna/strony lub endpointu:
+            // if (window.opener) window.opener.postMessage({ type: 'dzin_reply', text }, '*');
+            // if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'dzin_reply', text }, '*');
+            // fetch('https://inny-adres.example/reply', {
+            //     method: 'POST',
+            //     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            //     body: text
+            // }).catch(() => {});
+        };
+
         var Module = {
             preRun: [],
             postRun: [],

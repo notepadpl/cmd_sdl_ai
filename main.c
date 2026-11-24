@@ -19,6 +19,7 @@
 #include "dzin_babble.h"
 #include "sip_mod.h"
 /* Ostatnia myśl Dżina */
+ 
 static char g_last_genie_thought[LINE_LEN] = "a4a4";
 
 static void set_genie_thought(const char* thought) {
@@ -32,6 +33,26 @@ static void append_prefixed_to_user_console(const char* prefix, const char* msg)
     snprintf(buf, sizeof(buf), "%s%s", prefix ? prefix : "", msg);
     push_to_global_output(buf);
 }
+#ifdef __EMSCRIPTEN__
+EM_JS(void, js_on_dzin_reply, (const char* msg), {
+    if (!msg) return;
+    const text = UTF8ToString(msg);
+    if (typeof window.onDzinReply === 'function') {
+        window.onDzinReply(text);
+    }
+});
+#endif
+
+static void emit_dzin_reply(const char* prefix, const char* msg) {
+    if (!msg || msg[0] == '\0') return;
+    append_prefixed_to_user_console(prefix, msg);
+#ifdef __EMSCRIPTEN__
+    char full_msg[LINE_LEN];
+    snprintf(full_msg, sizeof(full_msg), "%s%s", prefix ? prefix : "", msg);
+    js_on_dzin_reply(full_msg);
+#endif
+}
+
 
 void main_loop(void* arg) {
     struct AppState* state = (struct AppState*)arg;
@@ -75,13 +96,15 @@ void main_loop(void* arg) {
     char srv_in[LINE_LEN];
     char cli_in[LINE_LEN];
 
+#ifndef __EMSCRIPTEN__
     if (dzin_server_update(srv_in, LINE_LEN, g_last_genie_thought)) {
         push_to_stm(srv_in);
         set_genie_thought(srv_in);
-        append_prefixed_to_user_console("[SERWER] ", srv_in);
+        emit_dzin_reply("[SERWER] ", srv_in);
         state->scroll_offset = 0;
         dzin_atomic_molecular_mutation(&trained_model, 0.25f);
     }
+#endif
 
     if (dzin_client_update(cli_in, LINE_LEN)) {
         push_to_stm(cli_in);
@@ -254,7 +277,9 @@ int main(int argc, char* args[]) {
     if (!font) font = TTF_OpenFont("font.ttf", 18);
     if (!font) font = TTF_OpenFont("assets/lazy.ttf", 18);
 
+    #ifndef __EMSCRIPTEN__
     dzin_server_init(4444);
+#endif
     dzin_client_init("127.0.0.1", 4444);
 
     pthread_mutex_lock(&ui_mutex);
