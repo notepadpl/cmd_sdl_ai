@@ -33,15 +33,7 @@ static void append_prefixed_to_user_console(const char* prefix, const char* msg)
     snprintf(buf, sizeof(buf), "%s%s", prefix ? prefix : "", msg);
     push_to_global_output(buf);
 }
-#ifdef __EMSCRIPTEN__
-EM_JS(void, js_on_dzin_reply, (const char* msg), {
-    if (!msg) return;
-    const text = UTF8ToString(msg);
-    if (typeof window.onDzinReply === 'function') {
-        window.onDzinReply(text);
-    }
-});
-#endif
+
 
 static void emit_dzin_reply(const char* prefix, const char* msg) {
     if (!msg || msg[0] == '\0') return;
