@@ -16,7 +16,7 @@ EM_JS(void, js_on_dzin_reply, (const char* msg), {
 });
 #endif
 
-static inline void dzin_html_emit_reply(const char* prefix, const char* msg) {
+static inline void emit_dzin_reply(const char* prefix, const char* msg) {
     if (!msg || msg[0] == '\0') return;
     char full_msg[LINE_LEN];
     snprintf(full_msg, sizeof(full_msg), "%s%s", prefix ? prefix : "", msg);
@@ -42,6 +42,14 @@ void zewnetrzny_input_ai(const char* user_text) {
 
 * W `main.c` (po `#include "dzin_io.h"`) dodaj `#include "dzin_html.h"`[cite: 2, 3].
 * W `main_loop` używaj `dzin_html_emit_reply("[KLIENT] ", cli_in);` (oraz pod `#ifndef __EMSCRIPTEN__` `dzin_html_emit_reply("[SERWER] ", srv_in);`), zamiast ręcznie kleić `append_prefixed_to_user_console`[cite: 2].
-
+static void emit_dzin_reply(const char* prefix, const char* msg) {
+    if (!msg || msg[0] == '\0') return;
+    append_prefixed_to_user_console(prefix, msg);
+#ifdef __EMSCRIPTEN__
+    char full_msg[LINE_LEN];
+    snprintf(full_msg, sizeof(full_msg), "%s%s", prefix ? prefix : "", msg);
+    js_on_dzin_reply(full_msg);
+#endif
+}
 Na tym etapie najlepiej najpierw sprawdzić na żywo w GitHub Actions / przeglądarce, czy build przechodzi czysto i czy nie ma już żadnego `undefined reference` — jak pojawi się jakikolwiek błąd kompilacji, wklej tu dokładną linijkę, a od razu go złapiemy.
 */

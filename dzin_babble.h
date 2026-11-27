@@ -20,7 +20,7 @@ static uint32_t dzin_babble_mix32(uint32_t x) {
     x ^= x >> 16;
     return x;
 }
-
+ 
 static void dzin_babble_generate_ex(char *out, size_t out_sz,
                                     int gen,
                                     const uint8_t *buf,
@@ -118,5 +118,6 @@ static void dzin_babble_tick(char *last_thought_out, size_t last_thought_sz, int
 
     dzin_atomic_molecular_mutation(&trained_model, 0.3f);
 }
+
 
 #endif /* DZIN_BABBLE_H */

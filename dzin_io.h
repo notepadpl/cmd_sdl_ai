@@ -11,6 +11,7 @@
 #include "sip_mod.h"
 #include "netstat.h"
 #include "dzin_term.h"
+#include "dzin_html.h"
 #include "dzin_fetch.h"
 void push_to_global_output(const char* line);
 
@@ -479,7 +480,40 @@ void write_success_state(int gen, const char* source, const char* successful_cmd
     pthread_mutex_unlock(&file_rw_mutex);
 }
 
+void check_and_reward_genie_thought(const char* thought) {
+    char target_cmd[32] = "";
 
+    if (strstr(thought, "ls") != NULL) {
+        strcpy(target_cmd, "ls -la");
+    } else if (strstr(thought, "pwd") != NULL) {
+        strcpy(target_cmd, "pwd");
+    } else if (strstr(thought, "date") != NULL) {
+        strcpy(target_cmd, "date");
+    }
+
+    if (strlen(target_cmd) > 0) {
+        pthread_mutex_lock(&ui_mutex);
+        if (global_output_count < MAX_LINES) {
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[MAGIA] Dzin wydukal komende: %s", target_cmd);
+        }
+        pthread_mutex_unlock(&ui_mutex);
+
+        char *res = run_system_command(target_cmd);
+        if (res) {
+            pthread_mutex_lock(&ui_mutex);
+            char *line = strtok(res, "\n");
+            while (line != NULL && global_output_count < MAX_LINES) {
+                snprintf(globalOutputLines[global_output_count++], LINE_LEN, " > %s", line);
+                line = strtok(NULL, "\n");
+            }
+            pthread_mutex_unlock(&ui_mutex);
+            free(res);
+        }
+
+        dzin_atomic_molecular_mutation(&trained_model, 0.1f);
+        write_success_state(trained_model.generation, "GENIE-MAGIC", target_cmd);
+    }
+}
 
 void* background_terminal_thread(void* arg) {
     (void)arg;
