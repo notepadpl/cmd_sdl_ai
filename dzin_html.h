@@ -6,7 +6,7 @@
 #include "dzin_io.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-
+extern void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display);
 EM_JS(void, js_on_dzin_reply, (const char* msg), {
     if (!msg) return;
     const text = UTF8ToString(msg);

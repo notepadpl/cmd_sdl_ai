@@ -12,11 +12,11 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
-
 #include "dzin_core.h"
 #include "dzin_io.h"
 #include "dzin_server.h"
 #include "dzin_client.h"
+
 #include "dzin_babble.h"
 #include "dzin_html.h"
 //#include "sip_mod.h"
@@ -37,15 +37,7 @@ static void append_prefixed_to_user_console(const char* prefix, const char* msg)
 }
 
 
-static void emit_dzin_reply(const char* prefix, const char* msg) {
-    if (!msg || msg[0] == '\0') return;
-    append_prefixed_to_user_console(prefix, msg);
-#ifdef __EMSCRIPTEN__
-    char full_msg[LINE_LEN];
-    snprintf(full_msg, sizeof(full_msg), "%s%s", prefix ? prefix : "", msg);
-    js_on_dzin_reply(full_msg);
-#endif
-}
+
 
 
 void main_loop(void* arg) {
