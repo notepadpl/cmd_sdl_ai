@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
-
+#include "dzin_io.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 
