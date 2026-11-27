@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +18,8 @@
 #include "dzin_server.h"
 #include "dzin_client.h"
 #include "dzin_babble.h"
-#include "sip_mod.h"
+#include "dzin_html.h"
+//#include "sip_mod.h"
 /* Ostatnia myśl Dżina */
  
 static char g_last_genie_thought[LINE_LEN] = "a4a4";

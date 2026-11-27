@@ -31,9 +31,9 @@ static int dzin_has_orig_termios = 0;
 static void dzin_restore_termios(void) {
     if (dzin_has_orig_termios) {
         tcsetattr(STDIN_FILENO, TCSANOW, &dzin_orig_termios);
+        dzin_has_orig_termios = 0;
     }
 }
-
 static void dzin_handle_sigint(int sig) {
     (void)sig;
     dzin_restore_termios();
@@ -295,7 +295,7 @@ static int dzin_exec_builtin(int argc, char **argv) {
 static void dzin_ensure_android_path(void) {
     const char *cur = getenv("PATH");
     const char *base = "/system/bin:/system/xbin:/busybox-virtual:"
-                       "/data/user/0/com.n0n3m4.droidc/files:"
+                       "assets/busybox-virtual:"
                        "/data/user/0/com.n0n3m4.droidc/files/gcc/bin";
     if (!cur || !*cur) {
         setenv("PATH", base, 1);
@@ -357,46 +357,54 @@ static void dzin_exec_external(char **argv) {
     /* Proces macierzysty: czytamy strumień wyjścia dziecka i pchamy do UI */
     close(pipefd[1]);
 
-    char read_buf[1024];
-    char line_buf[LINE_LEN];
-    size_t line_pos = 0;
-    ssize_t n;
+  char read_buf[1024];
+char line_buf[LINE_LEN];
+size_t line_pos = 0;
+ssize_t n;
 
-    while ((n = read(pipefd[0], read_buf, sizeof(read_buf))) > 0) {
-        ssize_t off = 0;
-        while (off < n) {
-            ssize_t w = write(STDOUT_FILENO, read_buf + off, (size_t)(n - off));
-            if (w <= 0) break;
-            off += w;
-        }
+memset(read_buf, 0, sizeof(read_buf));
+memset(line_buf, 0, sizeof(line_buf));
 
-        for (ssize_t i = 0; i < n; i++) {
-            char ch = read_buf[i];
-            if (ch == '\n') {
-                line_buf[line_pos] = '\0';
-                if (line_pos > 0) {
-                    push_to_global_output(line_buf);
-                }
+while ((n = read(pipefd[0], read_buf, sizeof(read_buf))) > 0) {
+    ssize_t off = 0;
+    while (off < n) {
+        ssize_t w = write(STDOUT_FILENO, read_buf + off, (size_t)(n - off));
+        if (w <= 0) break;
+        off += w;
+    }
+
+    for (ssize_t i = 0; i < n; i++) {
+        char ch = read_buf[i];
+        if (ch == '\n') {
+            line_buf[line_pos] = '\0';
+            if (line_pos > 0) {
+                push_to_global_output(line_buf);
+            }
+            line_pos = 0;
+            memset(line_buf, 0, sizeof(line_buf));
+        } else if (ch != '\r') {
+            if (line_pos + 1 < sizeof(line_buf)) {
+                line_buf[line_pos++] = ch;
+            } else {
+                line_buf[sizeof(line_buf) - 1] = '\0';
+                push_to_global_output(line_buf);
                 line_pos = 0;
-            } else if (ch != '\r') {
-                if (line_pos + 1 < sizeof(line_buf)) {
-                    line_buf[line_pos++] = ch;
-                } else {
-                    line_buf[sizeof(line_buf) - 1] = '\0';
-                    push_to_global_output(line_buf);
-                    line_pos = 0;
-                    line_buf[line_pos++] = ch;
-                }
+                memset(line_buf, 0, sizeof(line_buf));
+                line_buf[line_pos++] = ch;
             }
         }
     }
+    memset(read_buf, 0, sizeof(read_buf));
+}
 
-    if (line_pos > 0) {
-        line_buf[line_pos] = '\0';
-        push_to_global_output(line_buf);
-    }
+if (line_pos > 0) {
+    line_buf[line_pos] = '\0';
+    push_to_global_output(line_buf);
+}
 
-    close(pipefd[0]);
+memset(read_buf, 0, sizeof(read_buf));
+memset(line_buf, 0, sizeof(line_buf));
+close(pipefd[0]);
 
     int status = 0;
     waitpid(pid, &status, 0);
@@ -423,35 +431,40 @@ static int dzin_term_run(void) {
     dzin_out_str("Mini-shell gotowy (wpisz 'help' lub 'exit').");
     dzin_show_prompt();
 
-    char line[DZIN_TERM_LINE_CAP];
-    char *argv[DZIN_TERM_ARGV_CAP];
+char line[DZIN_TERM_LINE_CAP];
+char *argv[DZIN_TERM_ARGV_CAP];
 
-    while (1) {
-        if (dzin_read_line(line, sizeof(line)) != 0) {
-            break;
-        }
+while (1) {
+    memset(line, 0, sizeof(line));
+    memset(argv, 0, sizeof(argv));
 
-        int argc = dzin_split_argv(line, argv, DZIN_TERM_ARGV_CAP);
-        if (argc == 0) {
-            dzin_show_prompt();
-            continue;
-        }
-
-        int rc = dzin_exec_builtin(argc, argv);
-        if (rc == 1) {
-            break;
-        }
-        if (rc == 2) {
-            dzin_show_prompt();
-            continue;
-        }
-
-        dzin_exec_external(argv);
-        dzin_show_prompt();
+    if (dzin_read_line(line, sizeof(line)) != 0) {
+        break;
     }
 
-    dzin_restore_termios();
-    dzin_out_str("Terminal przywrocony. Koniec.\n");
+    int argc = dzin_split_argv(line, argv, DZIN_TERM_ARGV_CAP);
+    if (argc == 0) {
+        dzin_show_prompt();
+        continue;
+    }
+
+    int rc = dzin_exec_builtin(argc, argv);
+    if (rc == 1) {
+        break;
+    }
+    if (rc == 2) {
+        dzin_show_prompt();
+        continue;
+    }
+
+    dzin_exec_external(argv);
+    dzin_show_prompt();
+}
+
+memset(line, 0, sizeof(line));
+memset(argv, 0, sizeof(argv));
+dzin_restore_termios();
+dzin_out_str("Terminal przywrocony. Koniec.\n");
     return 0;
 }
 

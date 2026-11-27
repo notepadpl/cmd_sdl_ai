@@ -5,30 +5,21 @@
 #include "dzin_client.h"
 #include "dzin_core.h"
 #include "serverc.h"
-#include "press.h"
+#include "press_dzin.h"
+//#include "press.h"
+//#include "dzin_sip.h"
 #include "sip_mod.h"
-#include "dzin_netstat.h"
+#include "netstat.h"
 #include "dzin_term.h"
+#include "dzin_fetch.h"
 void push_to_global_output(const char* line);
-/*
-void push_to_global_output(const char* line) {
-    if (!line) return;
-    pthread_mutex_lock(&ui_mutex);
-    if (global_output_count < MAX_LINES) {
-        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", line);
-    } else {
-        for (int i = 0; i < MAX_LINES - 1; i++) {
-            snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
-        }
-        snprintf(globalOutputLines[MAX_LINES - 1], LINE_LEN, "%s", line);
-    }
-    pthread_mutex_unlock(&ui_mutex);
-}
-*/
+
 char* run_system_command(const char* cmd) {
     char full_cmd[2048];
     snprintf(full_cmd, sizeof(full_cmd), 
         "export PATH=\"/busybox-virtual:/data/user/0/com.n0n3m4.droidc/files/:/data/user/0/com.n0n3m4.droidc/files/gcc/bin:$PATH\"; %s </dev/null 2>&1", cmd);
+         snprintf(full_cmd, sizeof(full_cmd), 
+        "export PATH=\"/busybox-virtual:/assets/busybox:$PATH\"; %s </dev/null 2>&1", cmd);
 
     FILE *fp = popen(full_cmd, "r");
     if (fp == NULL) return NULL;
@@ -69,19 +60,6 @@ char* run_system_command(const char* cmd) {
     return buffer;
 }
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-
-EM_JS(void, js_on_dzin_reply, (const char* msg), {
-    if (!msg) return;
-    const text = UTF8ToString(msg);
-    if (typeof window.onDzinReply === 'function') {
-        window.onDzinReply(text);
-    }
-});
-#endif
-
-
 void push_to_global_output(const char* line) {
     if (!line) return;
     pthread_mutex_lock(&ui_mutex);
@@ -99,82 +77,7 @@ void push_to_global_output(const char* line) {
     js_on_dzin_reply(line);
 #endif
 }
-void extract_and_save_links(const unsigned char *buffer, long size) {
-    pthread_mutex_lock(&file_rw_mutex);
-    FILE *sf = fopen("success.html", "a+");
-    if (!sf) {
-        pthread_mutex_unlock(&file_rw_mutex);
-        return;
-    }
 
-    fprintf(sf, "<hr><h3>Nowe linki z pobranej strony:</h3><ul>\n");
-
-    long i = 0;
-    while (i < size - 8) {
-        if ((buffer[i] == 'h' || buffer[i] == 'H') &&
-            (buffer[i+1] == 't' || buffer[i+1] == 'T') &&
-            (buffer[i+2] == 't' || buffer[i+2] == 'T') &&
-            (buffer[i+3] == 'p' || buffer[i+3] == 'P')) {
-            
-            long start = i;
-            long end = start;
-            while (end < size) {
-                char c = (char)buffer[end];
-                if (c == ' ' || c == '"' || c == '\'' || c == '>' || c == '<' || c == '\n' || c == '\r' || c == '\t') {
-                    break;
-                }
-                end++;
-            }
-
-            long url_len = end - start;
-            if (url_len > 10 && url_len < 512) {
-                char url_str[512];
-                memcpy(url_str, &buffer[start], url_len);
-                url_str[url_len] = '\0';
-                fprintf(sf, "<li><a href=\"%s\" target=\"_blank\">%s</a></li>\n", url_str, url_str);
-            }
-            i = end;
-        } else {
-            i++;
-        }
-    }
-
-    fprintf(sf, "</ul>\n");
-    fclose(sf);
-    pthread_mutex_unlock(&file_rw_mutex);
-}
-
-void load_new_ocean_source(const char* filepath) {
-    FILE *plik = fopen(filepath, "rb");
-    if (!plik) return;
-
-    fseek(plik, 0, SEEK_END);
-    long new_size = ftell(plik);
-    rewind(plik);
-
-    if (new_size <= 0) {
-        fclose(plik);
-        return;
-    }
-
-    uint8_t *new_buffer = (uint8_t*)malloc(new_size);
-    if (!new_buffer) {
-        fclose(plik);
-        return;
-    }
-
-    fread(new_buffer, 1, new_size, plik);
-    fclose(plik);
-
-    extract_and_save_links(new_buffer, new_size);
-
-    pthread_mutex_lock(&ocean_mutex);
-    if (onnx_model_buffer) free(onnx_model_buffer);
-    onnx_model_buffer = new_buffer;
-    onnx_model_size = new_size;
-    ocean_index = 0; 
-    pthread_mutex_unlock(&ocean_mutex);
-}
 typedef struct {
     char *cmd;
 } TermArgs;
@@ -260,7 +163,37 @@ static void append_ui_line(const char *msg) {
     }
     pthread_mutex_unlock(&ui_mutex);
 }
+void *press_thread_func(void *arg) {
+    PressArgs *pargs = (PressArgs *)arg;
+    if (!pargs) return NULL;
 
+    char *argv[32];
+memset(argv, 0, sizeof(argv));
+int argc = 0;
+
+if (pargs->cmd) {
+    char *token = strtok(pargs->cmd, " \t\r\n");
+    while (token != NULL && argc < 32) {
+        argv[argc++] = token;
+        token = strtok(NULL, " \t\r\n");
+    }
+}
+
+if (argc > 0) {
+    press(argc, argv);
+}
+
+memset(argv, 0, sizeof(argv));
+if (pargs->cmd) {
+    memset(pargs->cmd, 0, strlen(pargs->cmd));
+    free(pargs->cmd);
+    pargs->cmd = NULL;
+}
+memset(pargs, 0, sizeof(*pargs));
+free(pargs);
+    return NULL;
+}
+/*
 static void *press_thread_func(void *arg) {
     PressArgs *pargs = (PressArgs *)arg;
     char *cmd = pargs ? pargs->cmd : NULL;
@@ -293,6 +226,7 @@ static void *press_thread_func(void *arg) {
 
     return NULL;
 }
+*/
 void parse_and_learn_command(const char* raw_input, const char* source_name, int force_display) {
     if (!raw_input || strlen(raw_input) == 0) return;
 // Komenda TERM (z opcjonalnymi argumentami, w tle bez blokowania głównego wątku)
@@ -345,9 +279,7 @@ void parse_and_learn_command(const char* raw_input, const char* source_name, int
         }
         return;
     }
-
 if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
-	/*c++ PressArgs *pargs = (PressArgs *)malloc(sizeof(PressArgs));*/
     PressArgs *pargs = malloc(sizeof(PressArgs));
     if (!pargs) return;
 
@@ -366,7 +298,28 @@ if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
     }
     return;
 }
+/*
+if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
 
+    PressArgs *pargs = malloc(sizeof(PressArgs));
+    if (!pargs) return;
+
+    pargs->cmd = strdup(raw_input);
+    if (!pargs->cmd) {
+        free(pargs);
+        return;
+    }
+
+    pthread_t pth;
+    if (pthread_create(&pth, NULL, press_thread_func, pargs) == 0) {
+        pthread_detach(pth);
+    } else {
+        free(pargs->cmd);
+        free(pargs);
+    }
+    return;
+}
+*/
     // 3. Komenda SIP
 // 3. Komenda SIP
     if (strncmp(raw_input, "sip ", 4) == 0 || strcmp(raw_input, "sip") == 0) {
@@ -410,7 +363,7 @@ if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
 
         pthread_mutex_lock(&ui_mutex);
         if (global_output_count < MAX_LINES) {
-            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[SIP] Zakonczono! Sprawdz index.html");
+            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[SIP] Zakonczono! Sprawdz sip.html");
         } else if (MAX_LINES > 0) {
             for (int i = 0; i < MAX_LINES - 1; i++) {
                 snprintf(globalOutputLines[i], LINE_LEN, "%s", globalOutputLines[i + 1]);
@@ -421,16 +374,18 @@ if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
         return;
     }
     // 4. Komenda NETSTAT (linki IP/porty do netstat.html)
-    if (strcmp(raw_input, "netstat") == 0) {
-        char info[LINE_LEN];
-        dzin_netstat_generate_html("netstat.html", info, sizeof(info));
-        pthread_mutex_lock(&ui_mutex);
-        if (global_output_count < MAX_LINES) {
-            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", info);
-        }
-        pthread_mutex_unlock(&ui_mutex);
-        return;
+if (strcmp(raw_input, "netstat") == 0) {
+    char info[LINE_LEN];
+    memset(info, 0, sizeof(info));
+    dzin_netstat_generate_html("netstat.html", info, sizeof(info));
+    pthread_mutex_lock(&ui_mutex);
+    if (global_output_count < MAX_LINES) {
+        snprintf(globalOutputLines[global_output_count++], LINE_LEN, "%s", info);
     }
+    pthread_mutex_unlock(&ui_mutex);
+    memset(info, 0, sizeof(info));
+    return;
+}
 
     // 5. Komenda FETCH
     if (strncmp(raw_input, "fetch ", 6) == 0) {
@@ -503,7 +458,14 @@ if (strncmp(raw_input, "press ", 6) == 0 || strcmp(raw_input, "press") == 0) {
         }
     }
 
-    if (res) free(res);
+   if (res) {
+    size_t rlen = strlen(res);
+    if (rlen > 0) {
+        memset(res, 0, rlen);
+    }
+    free(res);
+    res = NULL;
+}
     dzin_atomic_molecular_mutation(&trained_model, command_failed ? 0.9f : 0.4f);
 }
 
@@ -517,59 +479,22 @@ void write_success_state(int gen, const char* source, const char* successful_cmd
     pthread_mutex_unlock(&file_rw_mutex);
 }
 
-void check_and_reward_genie_thought(const char* thought) {
-    char target_cmd[32] = "";
 
-    if (strstr(thought, "ls") != NULL) {
-        strcpy(target_cmd, "ls -la");
-    } else if (strstr(thought, "pwd") != NULL) {
-        strcpy(target_cmd, "pwd");
-    } else if (strstr(thought, "date") != NULL) {
-        strcpy(target_cmd, "date");
-    }
-
-    if (strlen(target_cmd) > 0) {
-        pthread_mutex_lock(&ui_mutex);
-        if (global_output_count < MAX_LINES) {
-            snprintf(globalOutputLines[global_output_count++], LINE_LEN, "[MAGIA] Dzin wydukal komende: %s", target_cmd);
-        }
-        pthread_mutex_unlock(&ui_mutex);
-
-        char *res = run_system_command(target_cmd);
-        if (res) {
-            pthread_mutex_lock(&ui_mutex);
-            char *line = strtok(res, "\n");
-            while (line != NULL && global_output_count < MAX_LINES) {
-                snprintf(globalOutputLines[global_output_count++], LINE_LEN, " > %s", line);
-                line = strtok(NULL, "\n");
-            }
-            pthread_mutex_unlock(&ui_mutex);
-            free(res);
-        }
-
-        dzin_atomic_molecular_mutation(&trained_model, 0.1f);
-        write_success_state(trained_model.generation, "GENIE-MAGIC", target_cmd);
-    }
-}
 
 void* background_terminal_thread(void* arg) {
     (void)arg;
-    char input_buf[256];
-    while (fgets(input_buf, sizeof(input_buf), stdin) != NULL) {
-        input_buf[strcspn(input_buf, "\r\n")] = 0;
-        if (strlen(input_buf) > 0) {
-            parse_and_learn_command(input_buf, "TERM-2", 0);
-        }
+char input_buf[256];
+memset(input_buf, 0, sizeof(input_buf));
+while (fgets(input_buf, sizeof(input_buf), stdin) != NULL) {
+    input_buf[strcspn(input_buf, "\r\n")] = 0;
+    if (strlen(input_buf) > 0) {
+        parse_and_learn_command(input_buf, "TERM-2", 0);
     }
+    memset(input_buf, 0, sizeof(input_buf));
+}
     return NULL;
 }
 
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void zewnetrzny_input_ai(const char* user_text) {
-    if (!user_text || strlen(user_text) == 0) return;
-    parse_and_learn_command(user_text, "USER-WEB", 1);
-}
+
 
 #endif // DZIN_IO_H

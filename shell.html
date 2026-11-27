@@ -37,17 +37,17 @@
             border-radius: 4px;
             outline: none;
         }
-        #send-btn {
+        #send-btn, #clear-msg-btn {
             background-color: #002200;
             border: 1px solid #00ff00;
             color: #00ff00;
             font-family: monospace;
             font-weight: bold;
-            padding: 8px 15px;
+            padding: 8px 12px;
             border-radius: 4px;
             cursor: pointer;
         }
-        #send-btn:active {
+        #send-btn:active, #clear-msg-btn:active {
             background-color: #00ff00;
             color: #000;
         }
@@ -71,7 +71,7 @@
             width: 100%;
             max-width: 750px;
             border: 1px solid #00aa00;
-            background-color: #040a04;
+            background-color: #020502;
             border-radius: 4px;
             padding: 8px;
             box-sizing: border-box;
@@ -81,6 +81,8 @@
             font-size: 12px;
             color: #77ff77;
             margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #004400;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -95,29 +97,44 @@
             border-radius: 3px;
             cursor: pointer;
         }
+        .term-screen {
+            height: 190px;
+            overflow-y: auto;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #33ff33;
+        }
         #terminal-output {
             margin: 0;
-            height: 170px;
-            overflow-y: auto;
+            display: inline;
             white-space: pre-wrap;
             word-break: break-word;
-            font-size: 13px;
-            line-height: 1.35;
         }
-        .out-err {
-            color: #ff6666;
-        }
-        .out-sys {
+        .term-prompt {
             color: #88ff88;
+            font-weight: bold;
+        }
+        .term-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 1em;
+            background-color: #33ff33;
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
         }
     </style>
 </head>
 <body>
 
-    <!-- 1. Pasek wpisywania (POST + Wasm) na górze -->
+    <!-- 1. Pasek wpisywania (PHP POST + Wasm) na górze -->
     <div class="input-container">
-        <input type="text" id="terminal-input" placeholder="Wpisz komendę (POST -> Wasm)..." autocomplete="off">
+        <input type="text" id="terminal-input" placeholder="Wpisz komendę (POST -> /index.php?api=1 & Wasm)..." autocomplete="off">
         <button id="send-btn" onclick="wyslijKomende()">POST</button>
+        <button id="clear-msg-btn" onclick="wyczyscRemoteMsg()">CLR MSG</button>
     </div>
 
     <!-- 2. Okno SDL / Canvas / Wasm w środku -->
@@ -125,57 +142,53 @@
         <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
     </div>
 
-    <!-- 3. Panel Output pod spodem -->
+    <!-- 3. Panel Output w stylu terminala pod spodem -->
     <div class="output-container">
         <div class="output-header">
-            <span>OUTPUT (WASM / POST BRIDGE)</span>
-            <button id="clear-out-btn" onclick="wyczyscOutput()">WYCZYŚĆ</button>
+            <span>dzin@wasm:~/shell$</span>
+            <button id="clear-out-btn" onclick="wyczyscOutput()">CLEAR</button>
         </div>
-        <pre id="terminal-output"></pre>
+        <div class="term-screen" id="term-screen" onclick="document.getElementById('terminal-input').focus()">
+            <span class="term-prompt">dzin@wasm:~$ </span><pre id="terminal-output"></pre><span class="term-cursor"></span>
+        </div>
     </div>
 
     <script type='text/javascript'>
-        // Dopasuj adresy do swojego serwera (np. http://127.0.0.1:8080/upload/post)
-        const POST_URL = '/upload/post';
-        const POLL_URL = '/latest-post';
+        const POST_URL = '/index.php?api=1';
+        const CLEAR_URL = '/index.php?api=1&action=clear';
+        const POLL_URL = '/msg.txt';
 
         let lastExternalMsg = null;
 
-        function dopiszOutput(text, cls = '') {
+        function dopiszOutput(text) {
+            const screen = document.getElementById('term-screen');
             const out = document.getElementById('terminal-output');
-            const line = document.createElement('div');
-            if (cls) line.className = cls;
-            line.textContent = text;
-            out.appendChild(line);
-            out.scrollTop = out.scrollHeight;
+            if (!out || !screen) return;
+
+            const str = String(text);
+            out.textContent += (out.textContent && !out.textContent.endsWith('\n') ? '\n' : '') + str;
+            screen.scrollTop = screen.scrollHeight;
         }
 
         function wyczyscOutput() {
-            document.getElementById('terminal-output').innerHTML = '';
+            const out = document.getElementById('terminal-output');
+            if (out) out.textContent = '';
         }
 
         function przekazDoWasm(val) {
             if (typeof Module !== 'undefined' && typeof Module.ccall === 'function') {
                 Module.ccall('zewnetrzny_input_ai', null, ['string'], [val]);
-                dopiszOutput('[WASM <-] ' + val, 'out-sys');
                 return true;
             }
-            dopiszOutput('[ERR] Module.ccall nie jest jeszcze gotowy!', 'out-err');
+            dopiszOutput('Module.ccall not ready');
             return false;
         }
 
         // Odpowiedzi wychodzące z Wasm (przez EM_JS -> window.onDzinReply)
         window.onDzinReply = function(text) {
-            dopiszOutput('[DZIN ->] ' + text, 'out-sys');
-
-            // Opcjonalnie: wysyłka odpowiedzi do innego okna/strony lub endpointu:
-            // if (window.opener) window.opener.postMessage({ type: 'dzin_reply', text }, '*');
-            // if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'dzin_reply', text }, '*');
-            // fetch('https://inny-adres.example/reply', {
-            //     method: 'POST',
-            //     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-            //     body: text
-            // }).catch(() => {});
+            if (text) {
+                dopiszOutput(String(text));
+            }
         };
 
         var Module = {
@@ -183,11 +196,11 @@
             postRun: [],
             print: function(text) {
                 console.log("[WASM OUT]: " + text);
-                dopiszOutput('[OUT] ' + text);
+                dopiszOutput(text);
             },
             printErr: function(text) {
                 console.error("[WASM ERR]: " + text);
-                dopiszOutput('[ERR] ' + text, 'out-err');
+                dopiszOutput(text);
             },
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
@@ -195,14 +208,14 @@
             })()
         };
 
-        // Wysyłka metodą POST + przekazanie do Wasm
+        // Wysyłka komendy do index.php (zdalne zapisanie w msg.txt) + przekazanie do Wasm
         async function wyslijKomende() {
             const input = document.getElementById('terminal-input');
             const val = input.value.trim();
             if (!val) return;
 
             input.value = '';
-            dopiszOutput('[POST ->] ' + val, 'out-sys');
+            dopiszOutput('$ ' + val);
 
             try {
                 const resp = await fetch(POST_URL, {
@@ -210,17 +223,34 @@
                     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
                     body: val
                 });
+                const srvText = (await resp.text()).trim();
                 if (!resp.ok) {
-                    dopiszOutput('[POST WARN] HTTP ' + resp.status, 'out-err');
+                    dopiszOutput('HTTP ' + resp.status + (srvText ? ': ' + srvText : ''));
+                } else if (srvText) {
+                    dopiszOutput(srvText);
                 }
             } catch (err) {
-                dopiszOutput('[POST FAIL] ' + err.message + ' (wywołuję lokalnie Wasm)', 'out-err');
+                dopiszOutput('POST error: ' + err.message);
             }
 
             przekazDoWasm(val);
         }
 
-        // Odbiór nowych danych zapisanych np. przez `curl -X POST` do pliku /upload/post
+        async function wyczyscRemoteMsg() {
+            try {
+                const resp = await fetch(CLEAR_URL, {
+                    method: 'POST',
+                    cache: 'no-store'
+                });
+                const txt = (await resp.text()).trim();
+                lastExternalMsg = '';
+                dopiszOutput(txt || 'msg.txt cleared');
+            } catch (err) {
+                dopiszOutput('Clear error: ' + err.message);
+            }
+        }
+
+        // Odbiór komend wysłanych zdalnie (np. przez curl -X POST na /index.php?api=1)
         async function pollIncomingPost() {
             try {
                 const resp = await fetch(POLL_URL, { cache: 'no-store' });
@@ -228,11 +258,17 @@
                 const text = (await resp.text()).trim();
                 if (text && text !== lastExternalMsg) {
                     lastExternalMsg = text;
-                    dopiszOutput('[CURL/FILE] ' + text, 'out-sys');
+                    dopiszOutput(text);
                     przekazDoWasm(text);
+
+                    await fetch(CLEAR_URL, {
+                        method: 'POST',
+                        cache: 'no-store'
+                    });
+                    lastExternalMsg = '';
                 }
             } catch (_) {
-                // Cichy ignor przy braku endpointu odczytu w trybie statycznym
+                // Ignoruj chwilowy brak połączenia przy odpytywaniu
             }
         }
 

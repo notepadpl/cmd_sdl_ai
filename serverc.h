@@ -63,7 +63,19 @@ static size_t oocean_index = 0;
     }
     fclose(f);
 }
-
+static void dzin_free_onnx_matrix(void) {
+    pthread_mutex_lock(&oocean_mutex);
+    if (onnx_model_buffer1) {
+        if (oonnx_model_size > 0) {
+            memset(onnx_model_buffer1, 0, oonnx_model_size);
+        }
+        free(onnx_model_buffer1);
+        onnx_model_buffer1 = NULL;
+    }
+    oonnx_model_size = 0;
+    oocean_index = 0;
+    pthread_mutex_unlock(&oocean_mutex);
+}
  void cerror(FILE *stream, char *cause, char *errno_str, char *shortmsg, char *longmsg) {
     fprintf(stream, "HTTP/1.1 %s %s\nContent-type: text/html\n\n", errno_str, shortmsg);
     fprintf(stream, "<html><body><h1>%s: %s</h1><p>%s: %s</p></body></html>", errno_str, shortmsg, longmsg, cause);
@@ -207,7 +219,7 @@ static size_t oocean_index = 0;
     if (argc == 2) {
         port = atoi(argv[1]);
     }
-
+dzin_free_onnx_matrix();
     load_onnx_matrix("network_anomaly.onnx");
 
     int parentfd, childfd, optval;
@@ -232,6 +244,12 @@ static size_t oocean_index = 0;
     info("🧞 [Dżin - Serwer HTTP] nasłuchuje na porcie 127.0.0.1:%d...\n", port);
 
     while (1) {
+    	memset(buf, 0, sizeof(buf));
+memset(method, 0, sizeof(method));
+memset(uri, 0, sizeof(uri));
+memset(version, 0, sizeof(version));
+memset(filename, 0, sizeof(filename));
+memset(filetype, 0, sizeof(filetype));
         clientlen = sizeof(clientaddr);
         childfd = accept(parentfd, (struct sockaddr *)&clientaddr, &clientlen);
         stream = fdopen(childfd, "r+");
